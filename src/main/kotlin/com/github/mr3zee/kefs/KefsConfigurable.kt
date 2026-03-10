@@ -258,7 +258,7 @@ internal class KefsConfigurable(private val project: Project) : Configurable {
             .setRemoveActionUpdater {
                 repoTable.selectedRows.none {
                     val modelIndex = repoTable.convertRowIndexToModel(it)
-                    repoModel.getItem(modelIndex) !in DefaultState.repositories
+                    repoModel.getItem(modelIndex) in DefaultState.repositories
                 }
             }
             .createPanel()
@@ -270,7 +270,7 @@ internal class KefsConfigurable(private val project: Project) : Configurable {
             .setRemoveActionUpdater {
                 pluginsTable.selectedRows.none {
                     val modelIndex = pluginsTable.convertRowIndexToModel(it)
-                    pluginsModel.getItem(modelIndex) !in DefaultState.plugins
+                    pluginsModel.getItem(modelIndex) in DefaultState.plugins
                 }
             }
             .createPanel()
