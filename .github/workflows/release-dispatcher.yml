@@ -111,6 +111,12 @@ jobs:
           BRANCH="changelog-update-$VERSION"
           LABEL="release changelog"
 
+          # Skip if patchChangelog produced no changes
+          if git diff --quiet; then
+            echo "No changelog changes to commit, skipping PR creation"
+            exit 0
+          fi
+
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
 
