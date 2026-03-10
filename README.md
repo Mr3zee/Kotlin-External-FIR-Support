@@ -13,7 +13,7 @@ Run Kotlin compiler plugins in the IDE.
 - Exception Analysis
 - Diagnostics & Management UI
 - Manual Control
-- **No Additional Configuration Required**
+- **Preconfigured for known plugins (kotlinx-rpc) and highly configurable for any other**
 
 ## Guides
 
@@ -40,7 +40,7 @@ highlighting, and code analysis.
 This solves the core instability problem and allows you to benefit from your compiler
 plugins' IDE-specific features, like custom diagnostics, all within the editor.
 
-**No Additional Configuration Required!**.
+**Preconfigured for known plugins (kotlinx-rpc) and highly configurable for any other.**
 
 ## Core Features
 

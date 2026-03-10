@@ -25,7 +25,20 @@ val explicitSinceBuild = providers.gradleProperty("pluginSinceBuild").get()
 val explicitUntilBuild = providers.gradleProperty("pluginUntilBuild").get()
 
 val resolvedSinceBuild = ideVersionMajor.ifEmpty { explicitSinceBuild }
-val resolvedUntilBuild = (if (ideVersionMajor.isNotEmpty()) "$ideVersionMajor.*" else "").ifEmpty { explicitUntilBuild }
+
+// Find the latest IDE major version from the ide.*.platformVersion entries in gradle.properties
+val latestIdeMajor = providers.gradlePropertiesPrefixedBy("ide.")
+    .get()
+    .keys
+    .mapNotNull { key ->
+        key.removeSuffix(".platformVersion")
+            .takeIf { it != key } // only keys ending with .platformVersion
+            ?.removePrefix("ide.") // strip the "ide." prefix to get e.g. "261"
+    }
+    .maxByOrNull { it.toIntOrNull() ?: 0 }
+
+// The latest IDE version gets an open untilBuild range for forward compatibility
+val resolvedUntilBuild = (if (ideVersionMajor.isNotEmpty() && ideVersionMajor != latestIdeMajor) "$ideVersionMajor.*" else "").ifEmpty { explicitUntilBuild }
 val resolvedIdeSuffix = ideVersionMajor.ifEmpty { explicitIdeSuffix }.ifEmpty { resolvedSinceBuild }
 
 // Resolve platformVersion: explicit -PplatformVersion takes precedence, otherwise look up from IDE version map
