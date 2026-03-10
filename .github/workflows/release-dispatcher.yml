@@ -18,7 +18,7 @@ on:
 jobs:
   dispatch:
     name: Prepare release & resolve IDE versions
-    if: github.ref == 'refs/heads/release/latest'
+    if: github.event_name == 'release' || github.ref == 'refs/heads/release/latest'
     runs-on: ubuntu-latest
     permissions:
       contents: write
