@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix replacement version patterns escaping regex metacharacters (e.g., `.` and `+` in version templates)
+- Fix lifecycle cache returning wrong JAR when the same plugin is requested with different versions
+- Fix watcher initialization order so local repository watchers work regardless of registration order at startup
+- Fix cache rediscovery for artifacts using replacement version patterns
+- Fix downloads from servers that omit `Content-Length` header (chunked/proxied responses)
+- Fix watch key leaks causing OS file handle exhaustion on deregister/cleanup
+- Fix `AtomicMoveNotSupportedException` with fallback to non-atomic move and `REPLACE_EXISTING`
+- Fix exception report file creation (inverted existence check)
+- Fix disk scanner crash on checksum computation I/O errors
+- Fix cross-platform path handling in file watcher and provider (use `invariantSeparatorsPathString`)
+- Fix service lookup in exception reporter
+
+### Changed
+
+- Plugin now requires IDE restart on install/update
+- Refactor `KefsJarAnalyzer` to use `ZipInputStream` instead of `JarFile`
+
 ## [0.3.1] - 2026-03-10
 
 ### Fixed
