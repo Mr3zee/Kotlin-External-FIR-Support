@@ -313,6 +313,8 @@ internal class KefsStorage(
                         withContext(Dispatchers.IO) {
                             it.resolve(kotlinIdeVersion).deleteRecursively()
                         }
+                    }.onFailure { e ->
+                        logger.warn("Failed to delete cache directory for $kotlinIdeVersion", e)
                     }
                 }
 

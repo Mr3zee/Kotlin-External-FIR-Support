@@ -400,6 +400,19 @@ java.lang.ClassNotFoundException: <ClassName of one of the plugins KEFS detected
    
    This is an internal workaround for known issues on the IDE side.
 
+### Windows: Long Path Issues
+
+**Symptoms:**
+- Cache operations fail with `FileNotFoundException` or `AccessDeniedException`
+- Plugin jars fail to download or move to the cache directory
+
+**Cause:** Windows has a default path length limit of 260 characters (`MAX_PATH`). Deep cache directories under `%USERPROFILE%\.kefs\` can exceed this limit.
+
+**Solution:** Enable long path support in Windows:
+1. Open **Group Policy Editor** (`gpedit.msc`) → **Computer Configuration** → **Administrative Templates** → **System** → **Filesystem** → Set **Enable Win32 long paths** to **Enabled**.
+2. Alternatively, set the registry key `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled` to `1`.
+3. Restart your machine for the changes to take effect.
+
 ### Still Having Issues?
 
 If none of the above solutions work, or if the issue is annoying or reproducible, please [report an issue](https://github.com/Mr3zee/kotlin-external-fir-support/issues) on our GitHub repository. When reporting, please include:

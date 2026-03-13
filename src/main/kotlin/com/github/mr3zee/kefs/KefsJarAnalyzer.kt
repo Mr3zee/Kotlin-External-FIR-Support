@@ -4,7 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.jar.JarFile
+import java.util.zip.ZipInputStream
 
 internal sealed interface KefsAnalyzedJar {
     data class Success(val fqNames: Set<String>) : KefsAnalyzedJar
@@ -32,46 +32,33 @@ internal object KefsJarAnalyzer {
             return@withContext KefsAnalyzedJar.Failure("File does not exist or is not a regular file: $jar")
         }
 
-        JarFile(jar.toFile()).use { jarFile ->
+        ZipInputStream(Files.newInputStream(jar)).use { zis ->
             val result = LinkedHashSet<String>()
-            val entries = jarFile.entries()
-            while (entries.hasMoreElements()) {
-                val e = entries.nextElement()
+            var entry = zis.nextEntry
+            while (entry != null) {
+                if (!entry.isDirectory) {
+                    val name = entry.name
+                    if (name.endsWith(".class")) {
+                        val base = name.removeSuffix(".class")
 
-                if (e.isDirectory) {
-                    continue
+                        // Exclude special descriptors
+                        val skip = base == "module-info" || base.endsWith("module-info") ||
+                                base == "package-info" || base.endsWith("package-info") ||
+                                @Suppress("CanConvertToMultiDollarString")
+                                base.contains("special$\$inlined") ||
+                                syntheticSkippableClass.matches(base)
+
+                        if (!skip) {
+                            val fqn = base
+                                .replace('/', '.')
+                                .replace('$', '.')
+
+                            result.add(fqn)
+                        }
+                    }
                 }
-
-                val name = e.name
-                if (!name.endsWith(".class")) {
-                    continue
-                }
-
-                val base = name.removeSuffix(".class")
-
-                // Exclude special descriptors
-                if (base == "module-info" || base.endsWith("module-info")) {
-                    continue
-                }
-
-                if (base == "package-info" || base.endsWith("package-info")) {
-                    continue
-                }
-
-                @Suppress("CanConvertToMultiDollarString")
-                if (base.contains("special$\$inlined")) {
-                    continue
-                }
-
-                if (syntheticSkippableClass.matches(base)) {
-                    continue
-                }
-
-                val fqn = base
-                    .replace('/', '.')
-                    .replace('$', '.')
-
-                result.add(fqn)
+                zis.closeEntry()
+                entry = zis.nextEntry
             }
 
             KefsAnalyzedJar.Success(result)

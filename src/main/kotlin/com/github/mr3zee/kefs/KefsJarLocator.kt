@@ -18,6 +18,7 @@ import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 import java.io.IOException
 import java.math.BigInteger
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -538,7 +539,11 @@ internal object KefsJarLocator {
             val finalFilename = jar.path.removeDownloadingExtension()
 
             io {
-                Files.move(jar.path, finalFilename, StandardCopyOption.ATOMIC_MOVE)
+                try {
+                    Files.move(jar.path, finalFilename, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                } catch (_: AtomicMoveNotSupportedException) {
+                    Files.move(jar.path, finalFilename, StandardCopyOption.REPLACE_EXISTING)
+                }
             }
 
             LocatorResult.Cached(
@@ -642,7 +647,9 @@ internal object KefsJarLocator {
             result
         } finally {
             if (result !is LocatorResult.Cached) {
-                io { file.delete() }
+                runCatchingExceptCancellation { io { file.delete() } }.onFailure { e ->
+                    logger.debug("Failed to delete temporary file $file: ${e::class}: ${e.message}")
+                }
             }
         }
     }

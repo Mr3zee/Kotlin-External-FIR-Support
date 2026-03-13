@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project
 import org.jetbrains.kotlin.idea.fir.extensions.KotlinBundledFirCompilerPluginProvider
 import java.nio.file.Path
 import kotlin.io.path.extension
+import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.io.path.name
 import kotlin.to
 
@@ -14,7 +15,7 @@ internal class KefsProvider : KotlinBundledFirCompilerPluginProvider {
         val storage = project.service<KefsStorage>()
         storage.recordProviderCallStart()
         try {
-            if (IGNORE_LIST.any { userSuppliedPluginJar.toString().contains(it) }) {
+            if (isIgnored(userSuppliedPluginJar)) {
                 return null
             }
 
@@ -75,12 +76,12 @@ internal class KefsProvider : KotlinBundledFirCompilerPluginProvider {
     ): RequestedKotlinPluginDescriptor? {
         val urls = descriptor.ids.map {
             it to listOf(
-                "${it.getPluginGroupPath()}/${it.artifactId}/",
+                "${it.getPluginGroupPath().invariantSeparatorsPathString}/${it.artifactId}/",
                 "${it.groupId}/${it.artifactId}/",
             )
         }
 
-        val stringPath = path.toString()
+        val stringPath = path.toString().replace('\\', '/')
         return urls.firstOrNull { (_, urlVariations) ->
             urlVariations.any { url ->
                 stringPath.contains("/$url") || stringPath.startsWith(url)
@@ -96,6 +97,11 @@ internal class KefsProvider : KotlinBundledFirCompilerPluginProvider {
 }
 
 internal val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
+
+internal fun isIgnored(path: Path): Boolean {
+    val normalizedPath = path.toString().replace('\\', '/')
+    return IGNORE_LIST.any { normalizedPath.contains(it) }
+}
 
 internal val IGNORE_LIST = listOf(
     "org.jetbrains.kotlin/kotlin-scripting-jvm/",

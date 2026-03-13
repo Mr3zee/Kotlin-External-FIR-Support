@@ -398,7 +398,7 @@ internal class KefsExceptionReporterImpl(
         val reportFile = reportsDir.resolve(reportFilename)
 
         withContext(Dispatchers.IO) {
-            if (reportFile.exists()) {
+            if (!reportFile.exists()) {
                 reportFile.createFile()
             }
 

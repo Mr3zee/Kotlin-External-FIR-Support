@@ -31,6 +31,7 @@ internal class KefsFileWatcher(
     private lateinit var watchService: WatchService
 
     private val watchedDirToRoot = ConcurrentHashMap<Path, Path>()
+    private val watchedDirToKey = ConcurrentHashMap<Path, WatchKey>()
     private val registeredRoots = ConcurrentHashMap.newKeySet<Path>()
     private val localRepoRoots = ConcurrentHashMap.newKeySet<Path>()
     private val cacheDirSelfUpdates = AtomicLong(0)
@@ -111,7 +112,10 @@ internal class KefsFileWatcher(
                         key.reset()
                         return true
                     }
-                    watchedDirToRoot.keys.removeIf { it.startsWith(resolved) }
+                    watchedDirToRoot.keys.filter { it.startsWith(resolved) }.forEach { removedPath ->
+                        watchedDirToRoot.remove(removedPath)
+                        watchedDirToKey.remove(removedPath)?.cancel()
+                    }
                 }
             }
         }
@@ -134,6 +138,8 @@ internal class KefsFileWatcher(
     }
 
     fun cancelAllWatchKeys() {
+        watchedDirToKey.values.forEach { it.cancel() }
+        watchedDirToKey.clear()
         watchedDirToRoot.clear()
         registeredRoots.clear()
     }
@@ -163,11 +169,14 @@ internal class KefsFileWatcher(
                     it.isDirectory()
                 }.forEach { subdir ->
                     if (watchedDirToRoot.putIfAbsent(subdir, root) == null) {
-                        subdir.registerSafe(
+                        val key = subdir.registerSafe(
                             StandardWatchEventKinds.ENTRY_CREATE,
                             StandardWatchEventKinds.ENTRY_MODIFY,
                             StandardWatchEventKinds.ENTRY_DELETE,
                         )
+                        if (key != null) {
+                            watchedDirToKey[subdir] = key
+                        }
                     }
                 }
             }
@@ -194,6 +203,7 @@ internal class KefsFileWatcher(
     private fun deregisterWatchedDir(dir: Path?) {
         if (dir != null) {
             watchedDirToRoot.remove(dir)
+            watchedDirToKey.remove(dir)?.cancel()
         }
     }
 
