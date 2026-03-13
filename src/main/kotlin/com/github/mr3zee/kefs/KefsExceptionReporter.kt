@@ -2,6 +2,7 @@ package com.github.mr3zee.kefs
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
@@ -21,22 +22,6 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.createFile
 import kotlin.io.path.exists
 import kotlin.io.path.writeText
-
-internal interface KefsExceptionReporter : KotlinPluginDiscoveryUpdater {
-    fun start()
-
-    fun stop()
-
-    suspend fun lookFor(): Map<JarId, Set<String>>
-
-    fun matched(ids: List<JarId>, exception: Throwable, autoDisable: Boolean, isProbablyIncompatible: Boolean)
-
-    fun hasExceptions(pluginName: String, mavenId: String, requestedVersion: RequestedVersion): Boolean
-
-    fun getExceptionsReport(jarId: JarId): ExceptionsReport?
-
-    suspend fun createReportFile(report: ExceptionsReport): Path?
-}
 
 internal class ExceptionsReport(
     val pluginName: String,
@@ -84,10 +69,11 @@ internal class ExceptionsReport(
     }
 }
 
-internal class KefsExceptionReporterImpl(
+@Service(Service.Level.PROJECT)
+internal class KefsExceptionReporter(
     val project: Project,
     val scope: CoroutineScope,
-) : KefsExceptionReporter, Disposable, KotlinPluginDiscoveryUpdater {
+) : Disposable, KotlinPluginDiscoveryUpdater {
     private val logger by lazy { thisLogger() }
 
     private val statusPublisher by lazy { project.messageBus.syncPublisher(KotlinPluginStatusUpdater.TOPIC) }
@@ -150,7 +136,7 @@ internal class KefsExceptionReporterImpl(
         metadata.clear()
     }
 
-    override fun start() {
+    fun start() {
         val newState = initializationState()
         if (!state.compareAndSet(null, newState)) {
             return
@@ -159,7 +145,7 @@ internal class KefsExceptionReporterImpl(
         stackTraceMap.clear()
     }
 
-    override fun stop() {
+    fun stop() {
         state.getAndSet(null)?.cancel()
         stackTraceMap.clear()
         caughtExceptions.clear()
@@ -170,7 +156,7 @@ internal class KefsExceptionReporterImpl(
     }
 
     private fun initializationState() = scope.launch(
-        context = CoroutineName("KefsExceptionReporterImpl.start"),
+        context = CoroutineName("KefsExceptionReporter.start"),
         start = CoroutineStart.LAZY,
     ) {
         val jars = project.service<KefsStorage>().requestDiscovery()
@@ -254,7 +240,7 @@ internal class KefsExceptionReporterImpl(
         }
     }
 
-    override suspend fun lookFor(): Map<JarId, Set<String>> {
+    suspend fun lookFor(): Map<JarId, Set<String>> {
         val current = state.get()
         if (current == null) {
             start()
@@ -267,7 +253,7 @@ internal class KefsExceptionReporterImpl(
         return stackTraceMap.toMap()
     }
 
-    override fun matched(
+    fun matched(
         ids: List<JarId>,
         exception: Throwable,
         autoDisable: Boolean,
@@ -358,12 +344,12 @@ internal class KefsExceptionReporterImpl(
         }
     }
 
-    override fun hasExceptions(pluginName: String, mavenId: String, requestedVersion: RequestedVersion): Boolean {
+    fun hasExceptions(pluginName: String, mavenId: String, requestedVersion: RequestedVersion): Boolean {
         return caughtExceptions[pluginName].orEmpty()
             .any { it.jarId.mavenId == mavenId && it.jarId.requestedVersion == requestedVersion }
     }
 
-    override fun getExceptionsReport(jarId: JarId): ExceptionsReport? {
+    fun getExceptionsReport(jarId: JarId): ExceptionsReport? {
         val exceptions = caughtExceptions[jarId.pluginName].orEmpty()
             .filter { it.jarId == jarId }
 
@@ -390,7 +376,7 @@ internal class KefsExceptionReporterImpl(
         }
     }
 
-    override suspend fun createReportFile(report: ExceptionsReport): Path? = runCatchingExceptCancellation {
+    suspend fun createReportFile(report: ExceptionsReport): Path? = runCatchingExceptCancellation {
         val storage = project.service<KefsStorage>()
         val reportsDir = storage.reportsDir() ?: return@runCatchingExceptCancellation null
 

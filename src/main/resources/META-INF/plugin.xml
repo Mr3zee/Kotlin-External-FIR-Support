@@ -39,11 +39,6 @@
                 factoryClass="com.github.mr3zee.kefs.KefsToolWindowFactory"
         />
 
-        <projectService
-                serviceInterface="com.github.mr3zee.kefs.KefsExceptionReporter"
-                serviceImplementation="com.github.mr3zee.kefs.KefsExceptionReporterImpl"
-        />
-
         <editorNotificationProvider
                 implementation="com.github.mr3zee.kefs.KefsEditorNotificationProvider"
         />
