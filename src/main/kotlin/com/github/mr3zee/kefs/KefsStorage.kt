@@ -227,7 +227,7 @@ internal class KefsStorage(
 
     private val pluginsCache = ConcurrentHashMap<String, ConcurrentHashMap<RequestedPluginKey, ArtifactState>>()
 
-    private val lifecycleCache = ConcurrentHashMap<String, Map<String, Path>>()
+    private val lifecycleCache = ConcurrentHashMap<Pair<String, RequestedVersion>, Map<String, Path>>()
 
     private val lastProvideCallTimestamp = AtomicLong(0)
     private val providerCallInProgress = AtomicLong(0L)
@@ -705,7 +705,8 @@ internal class KefsStorage(
         }
 
         // Check lifecycle cache first - returns cached value if lifecycle is active
-        lifecycleCache[requested.descriptor.name]?.let { cachedResult ->
+        val lifecycleCacheKey = requested.descriptor.name to requested.requestedVersion
+        lifecycleCache[lifecycleCacheKey]?.let { cachedResult ->
             val cachedPath = cachedResult.getValue(requested.artifact.id)
             logger.debug("Lifecycle cached value found for ${requested.descriptor.name}:${requested.artifact.id} (${requested.requestedVersion})")
             return cachedPath
@@ -740,7 +741,7 @@ internal class KefsStorage(
             return null
         }
 
-        lifecycleCache[requested.descriptor.name] = paths
+        lifecycleCache[lifecycleCacheKey] = paths
             .associate { it }
             .mapValues { (_, state) ->
                 state!!.jar.path // non-null by allExist guaranteed

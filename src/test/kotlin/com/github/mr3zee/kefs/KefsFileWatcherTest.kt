@@ -206,6 +206,55 @@ class KefsFileWatcherTest {
         assertEquals("No cache dir deletions expected", 0, cacheDirChangeCount.get())
     }
 
+    // --- Registration order tests ---
+
+    /**
+     * Regression test for Finding 2: registerLocalRepo before registerCacheDir
+     * must still produce working watch keys for local repo changes.
+     */
+    @Test
+    fun testLocalRepoRegisteredBeforeCacheDir(): Unit = runBlocking {
+        // Create a fresh watcher with reversed registration order
+        watcher.close()
+
+        val localChanges = CopyOnWriteArrayList<Path>()
+        val cacheChanges = AtomicInteger(0)
+
+        val freshWatcher = KefsFileWatcher(object : FileWatcherCallback {
+            override fun onLocalRepoChange(repoRoot: Path) {
+                localChanges.add(repoRoot)
+            }
+
+            override fun onCacheDirExternalChange() {
+                cacheChanges.incrementAndGet()
+            }
+        })
+
+        // Register local repo FIRST (before watchService is initialized)
+        freshWatcher.registerLocalRepo(localRepoDir)
+        // Then cache dir
+        freshWatcher.registerCacheDir(cacheDir)
+
+        try {
+            // Mutate local repo
+            createFile(localRepoDir.resolve("new-artifact.jar"), "content")
+
+            val deadline = System.currentTimeMillis() + 15000
+            while (System.currentTimeMillis() < deadline) {
+                freshWatcher.processOneEvent()
+                if (localChanges.isNotEmpty()) break
+            }
+
+            assertTrue(
+                "Local repo callback should fire even when registerLocalRepo is called before registerCacheDir",
+                localChanges.isNotEmpty()
+            )
+            assertEquals(localRepoDir.toAbsolutePath().normalize(), localChanges.first())
+        } finally {
+            freshWatcher.close()
+        }
+    }
+
     // --- Helpers ---
 
     private suspend fun createFile(path: Path, content: String) {

@@ -189,12 +189,30 @@ internal data class KotlinPluginDescriptor(
         }
 
         private val detectRegexMap by lazy { ConcurrentHashMap<String, Regex>() }
+        private val searchRegexMap by lazy { ConcurrentHashMap<String, Regex>() }
 
         fun getDetectPattern(mavenId: MavenId): Regex = detectRegexMap.computeIfAbsent(mavenId.id) {
             detect
                 .replace(JarMacro.ARTIFACT_ID.macro, mavenId.artifactId)
                 .plus("-${versionRegex}")
                 .toRegex()
+        }
+
+        /**
+         * Builds a regex from the search pattern + version template and uses it
+         * to extract the lib-version portion from a jar filename.
+         *
+         * Works regardless of where `<lib-version>` appears in the version template
+         * (e.g. `<kotlin-version>-<lib-version>`, `<lib-version>-<kotlin-version>`,
+         * `<kotlin-version>-v<lib-version>-compat`).
+         */
+        fun extractLibVersion(filename: String, mavenId: MavenId): String? {
+            val regex = searchRegexMap.computeIfAbsent(mavenId.id) {
+                val artifactString = Regex.escape(getArtifactString(mavenId))
+                Regex("${artifactString}-${versionRegex}\\.jar")
+            }
+            val match = regex.matchEntire(filename) ?: return null
+            return match.groups[LIB_VERSION_GROUP]?.value
         }
 
         fun getVersionString(

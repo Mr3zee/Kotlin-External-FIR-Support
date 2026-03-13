@@ -42,17 +42,22 @@ internal class KefsFileWatcher(
     suspend fun registerLocalRepo(path: Path) {
         val normalized = path.toAbsolutePath().normalize()
         localRepoRoots.add(normalized)
+        ensureWatchServiceInitialized(normalized)
         registerDirectoryTreeWatch(normalized)
     }
 
     suspend fun registerCacheDir(path: Path) {
         val normalized = path.toAbsolutePath().normalize()
+        ensureWatchServiceInitialized(normalized)
+        registerDirectoryTreeWatch(normalized)
+    }
+
+    private suspend fun ensureWatchServiceInitialized(path: Path) {
         if (!::watchService.isInitialized) {
             watchService = withContext(Dispatchers.IO) {
-                normalized.fileSystem.newWatchService()
+                path.fileSystem.newWatchService()
             }
         }
-        registerDirectoryTreeWatch(normalized)
     }
 
     fun markSelfUpdateStart() {

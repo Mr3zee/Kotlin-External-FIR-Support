@@ -362,6 +362,84 @@ class MyPluginTest : BasePlatformTestCase() {
         )
     }
 
+    /**
+     * Regression test for Finding 3: replacement-pattern cached jars must be
+     * rediscovered correctly by KefsDiskScanner even with complex version strings.
+     */
+    fun testDiskScannerWithReplacementPattern() {
+        val tempDir = Files.createTempDirectory("kefs-scanner-test")
+        try {
+            val replacement = KotlinPluginDescriptor.Replacement(
+                version = "<kotlin-version>-<lib-version>",
+                detect = "<artifact-id>",
+                search = "kotlinx-rpc-<artifact-id>",
+            )
+            val artifact = MavenId("org.jetbrains.kotlinx:compiler-plugin-k2")
+            val kotlinIdeVersion = "2.2.0-ij251-78"
+
+            // Create a jar file with replacement-pattern name
+            val jarName = "kotlinx-rpc-compiler-plugin-k2-2.2.0-ij251-78-0.10.2.jar"
+            Files.createFile(tempDir.resolve(jarName))
+
+            val result = KefsDiskScanner.findMatchingJar(
+                basePath = tempDir,
+                artifact = artifact,
+                kotlinIdeVersion = kotlinIdeVersion,
+                replacement = replacement,
+                matchFilter = MatchFilter(
+                    requestedVersion = "0.10.2".requested(),
+                    matching = KotlinPluginDescriptor.VersionMatching.EXACT,
+                ),
+            )
+
+            assertNotNull("Replacement-pattern jar should be discovered", result)
+            assertEquals("0.10.2", result!!.first.value)
+            assertEquals(jarName, result.third.fileName.toString())
+        } finally {
+            @OptIn(kotlin.io.path.ExperimentalPathApi::class)
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * Regression test: replacement version pattern where lib-version is NOT the
+     * trailing segment (e.g. <lib-version>-<kotlin-version>).
+     */
+    fun testDiskScannerWithReversedReplacementPattern() {
+        val tempDir = Files.createTempDirectory("kefs-scanner-test-reversed")
+        try {
+            val replacement = KotlinPluginDescriptor.Replacement(
+                version = "<lib-version>-<kotlin-version>",
+                detect = "<artifact-id>",
+                search = "my-plugin-<artifact-id>",
+            )
+            val artifact = MavenId("com.example:core")
+            val kotlinIdeVersion = "2.2.0"
+
+            // Filename: my-plugin-core-1.5.0-2.2.0.jar  (lib first, kotlin second)
+            val jarName = "my-plugin-core-1.5.0-2.2.0.jar"
+            Files.createFile(tempDir.resolve(jarName))
+
+            val result = KefsDiskScanner.findMatchingJar(
+                basePath = tempDir,
+                artifact = artifact,
+                kotlinIdeVersion = kotlinIdeVersion,
+                replacement = replacement,
+                matchFilter = MatchFilter(
+                    requestedVersion = "1.5.0".requested(),
+                    matching = KotlinPluginDescriptor.VersionMatching.EXACT,
+                ),
+            )
+
+            assertNotNull("Reversed replacement-pattern jar should be discovered", result)
+            assertEquals("1.5.0", result!!.first.value)
+            assertEquals(jarName, result.third.fileName.toString())
+        } finally {
+            @OptIn(kotlin.io.path.ExperimentalPathApi::class)
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
     private suspend fun loadAndAnalyzeJar(name: String): Set<String> {
         val jarUrl = MyPluginTest::class.java.getResource("/$name")
             ?: error("Failed to load jar")

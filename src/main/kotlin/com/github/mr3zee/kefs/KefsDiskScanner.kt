@@ -49,12 +49,18 @@ internal object KefsDiskScanner {
             return null
         }
 
-        val versionToPath = candidates
-            .associateBy {
+        val versionToPath = if (replacement != null) {
+            candidates.mapNotNull { path ->
+                val libVersion = replacement.extractLibVersion(path.name, artifact)
+                if (libVersion != null) libVersion to path else null
+            }.toMap()
+        } else {
+            candidates.associateBy {
                 it.name
                     .substringAfter("${artifact.artifactId}-$kotlinIdeVersion-")
                     .substringBefore(".jar")
             }
+        }
 
         val matched = getMatching(listOf(versionToPath.keys.toList()), "", matchFilter)
 

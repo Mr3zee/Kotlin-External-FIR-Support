@@ -898,9 +898,9 @@ internal object KefsJarLocator {
         url: String,
     ): DownloadResult = io {
         val result = client.prepareGet(url).execute { httpResponse ->
-            val contentLength = httpResponse.contentLength()?.toDouble() ?: 0.0
+            val contentLength = httpResponse.contentLength()
 
-            logger.debug("$logTag Request URL: $url, status: ${httpResponse.status}, size: $contentLength")
+            logger.debug("$logTag Request URL: $url, status: ${httpResponse.status}, size: ${contentLength ?: "unknown"}")
 
             if (httpResponse.status == HttpStatusCode.NotFound) {
                 return@execute DownloadResult.NotFound
@@ -913,7 +913,7 @@ internal object KefsJarLocator {
                 )
             }
 
-            if (contentLength == 0.0) {
+            if (contentLength == 0L) {
                 return@execute DownloadResult.FailedToFetch(
                     "Empty response body when downloading from $url"
                 )
@@ -921,15 +921,23 @@ internal object KefsJarLocator {
 
             try {
                 val channel: ByteReadChannel = httpResponse.body()
+                var bytesWritten = 0L
                 while (!channel.isClosedForRead) {
                     val packet = channel.readRemaining(DEFAULT_BUFFER_SIZE.toLong())
                     while (!packet.exhausted()) {
                         val bytes: ByteArray = packet.readByteArray()
                         destination.appendBytes(bytes)
+                        bytesWritten += bytes.size
                     }
                 }
 
-                DownloadResult.Success
+                if (bytesWritten == 0L) {
+                    DownloadResult.FailedToFetch(
+                        "Empty response body when downloading from $url"
+                    )
+                } else {
+                    DownloadResult.Success
+                }
             } catch (e: Exception) {
                 if (e is CancellationException) {
                     throw e
