@@ -85,10 +85,17 @@ internal object KefsDiskScanner {
 
         val original = jarPath.resolveOriginalJarFile()
 
-        if (original != null && checksum != md5(original).asChecksum()) {
-            runCatchingExceptCancellation { Files.deleteIfExists(jarPath) }
-            logger.debug("Checksums don't match with the original jar for $jarPath")
-            return null
+        if (original != null) {
+            val originalChecksum = runCatchingExceptCancellation { md5(original).asChecksum() }.getOrNull()
+                ?: return null
+
+            if (checksum != originalChecksum) {
+                runCatchingExceptCancellation { Files.deleteIfExists(jarPath) }.onFailure { e ->
+                    logger.warn("Failed to delete jar with mismatched checksum: $jarPath", e)
+                }
+                logger.debug("Checksums don't match with the original jar for $jarPath")
+                return null
+            }
         }
 
         val kotlinVersionMismatch = if (resolvedKotlinVersion != kotlinIdeVersion) {

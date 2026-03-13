@@ -81,7 +81,7 @@ internal class KefsProvider : KotlinBundledFirCompilerPluginProvider {
             )
         }
 
-        val stringPath = path.toString().replace('\\', '/')
+        val stringPath = path.invariantSeparatorsPathString
         return urls.firstOrNull { (_, urlVariations) ->
             urlVariations.any { url ->
                 stringPath.contains("/$url") || stringPath.startsWith(url)
@@ -99,7 +99,7 @@ internal class KefsProvider : KotlinBundledFirCompilerPluginProvider {
 internal val SEMVER_REGEX = "(\\d+\\.\\d+\\.\\d+)".toRegex()
 
 internal fun isIgnored(path: Path): Boolean {
-    val normalizedPath = path.toString().replace('\\', '/')
+    val normalizedPath = path.invariantSeparatorsPathString
     return IGNORE_LIST.any { normalizedPath.contains(it) }
 }
 

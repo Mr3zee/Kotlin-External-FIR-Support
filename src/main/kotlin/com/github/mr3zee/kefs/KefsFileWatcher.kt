@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.PathWalkOption
 import kotlin.io.path.exists
+import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.io.path.isDirectory
 import kotlin.io.path.walk
 
@@ -96,7 +97,7 @@ internal class KefsFileWatcher(
         val isCacheDir = !isLocalRepoRoot(root)
 
         for (event in events) {
-            val contextName = (event.context() as? Path)?.toString() ?: continue
+            val contextName = (event.context() as? Path) ?: continue
             val resolved = path.resolve(contextName)
 
             when (event.kind()) {
@@ -192,8 +193,8 @@ internal class KefsFileWatcher(
         // Fast path: direct lookup works when Path types match
         if (watchedDirToRoot.containsKey(rawPath)) return rawPath
         // Slow path: match by string representation
-        val pathStr = rawPath.toString()
-        return watchedDirToRoot.keys.find { it.toString() == pathStr }
+        val pathStr = rawPath.invariantSeparatorsPathString
+        return watchedDirToRoot.keys.find { it.invariantSeparatorsPathString == pathStr }
     }
 
     private fun isLocalRepoRoot(root: Path): Boolean {
