@@ -240,24 +240,26 @@ internal object KefsJarLocator {
             }
 
             val matchFilter = versioned.asMatchFilter()
+            val versionPrefix = versioned.descriptor.replacement?.getVersionString(kotlinIdeVersion, "")
+                ?: "${kotlinIdeVersion}-"
 
             val resolvedVersion = getMatching(
                 versions = manifestVersions.map { it.value.versions },
-                prefix = "${kotlinIdeVersion}-",
+                prefix = versionPrefix,
                 filter = matchFilter,
             ) ?: run {
                 val availableVersions = manifestVersions.mapValues { (_, manifestResult) ->
-                    manifestResult.versions.filter { it.startsWith(kotlinIdeVersion) }
+                    manifestResult.versions.filter { it.startsWith(versionPrefix) }
                 }
 
                 val notFoundCommonVersion = LocatorResult.NotFound(
                     state = ArtifactState.NotFound(
                         """
-                            |No compiler plugin artifact exists matching the requested version and criteria: 
-                            |  - Version: ${versioned.requestedVersion}, prefixed with $kotlinIdeVersion
+                            |No compiler plugin artifact exists matching the requested version and criteria:
+                            |  - Version: ${versioned.requestedVersion}, prefixed with $versionPrefix
                             |  - Criteria: ${matchFilter.matching}
                             |  - All artifacts in the bundle must have the same version.
-                            |Available versions: 
+                            |Available versions for Kotlin $kotlinIdeVersion:
                             |  - ${availableVersions.entries.joinToString("\n|  - ") { (k, v) -> "${k.id}: $v" }}
                             |Searched in $repository
                         """.trimMargin()

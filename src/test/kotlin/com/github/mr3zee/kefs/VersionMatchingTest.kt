@@ -187,6 +187,52 @@ class VersionMatchingTest {
         assertNull(result)
     }
 
+    @Test
+    fun `replacement-style prefix filters and strips correctly`() {
+        // Simulates a replacement pattern like <kotlin-version>-ij<lib-version>
+        // where getVersionString("2.2.0", "") produces "2.2.0-ij"
+        val versions = listOf(listOf("2.2.0-ij0.9.0", "2.2.0-ij1.0.0", "2.2.0-ij1.2.0", "2.2.0-1.5.0"))
+        val filter = MatchFilter("0.5.0".requested(), KotlinPluginDescriptor.VersionMatching.LATEST)
+
+        val result = getMatching(versions, "2.2.0-ij", filter)
+
+        assertNotNull(result)
+        // Only "2.2.0-ij*" versions are considered; "2.2.0-1.5.0" is excluded
+        assertEquals("1.2.0", result!!.value)
+    }
+
+    @Test
+    fun `replacement-style prefix does not match default-format versions`() {
+        // Versions in default format should not match a replacement-derived prefix
+        val versions = listOf(listOf("2.2.0-1.0.0", "2.2.0-2.0.0"))
+        val filter = MatchFilter("1.0.0".requested(), KotlinPluginDescriptor.VersionMatching.EXACT)
+
+        val result = getMatching(versions, "2.2.0-ij", filter)
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `getVersionString with empty lib version produces correct prefix`() {
+        val replacement = KotlinPluginDescriptor.Replacement(
+            version = "<kotlin-version>-ij<lib-version>",
+            detect = "<artifact-id>",
+            search = "<artifact-id>",
+        )
+
+        val prefix = replacement.getVersionString("2.2.0", "")
+        assertEquals("2.2.0-ij", prefix)
+
+        // And the default-format equivalent
+        val defaultReplacement = KotlinPluginDescriptor.Replacement(
+            version = "<kotlin-version>-<lib-version>",
+            detect = "<artifact-id>",
+            search = "<artifact-id>",
+        )
+        val defaultPrefix = defaultReplacement.getVersionString("2.2.0", "")
+        assertEquals("2.2.0-", defaultPrefix)
+    }
+
     // --- JarId equality ---
 
     @Test
