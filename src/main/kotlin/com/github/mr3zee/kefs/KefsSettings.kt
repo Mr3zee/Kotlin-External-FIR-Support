@@ -177,15 +177,23 @@ internal data class KotlinPluginDescriptor(
         val search: String,
     ) {
         private val versionRegex by lazy {
-            version
-                .replace(
-                    VersionMacro.KOTLIN_VERSION.macro,
-                    "(?<${KOTLIN_VERSION_GROUP}>\\d+\\.\\d+\\.\\d+(?:(?:\\.|\\+|-)[\\w.+-]+)?)"
-                )
-                .replace(
-                    VersionMacro.LIB_VERSION.macro,
-                    "(?<${LIB_VERSION_GROUP}>\\d+\\.\\d+\\.\\d+(?:(?:\\.|\\+|-)[\\w.+-]+)?)"
-                )
+            val macros = mapOf(
+                VersionMacro.KOTLIN_VERSION.macro to
+                        "(?<${KOTLIN_VERSION_GROUP}>\\d+\\.\\d+\\.\\d+(?:(?:\\.|\\+|-)[\\w.+-]+)?)",
+                VersionMacro.LIB_VERSION.macro to
+                        "(?<${LIB_VERSION_GROUP}>\\d+\\.\\d+\\.\\d+(?:(?:\\.|\\+|-)[\\w.+-]+)?)",
+            )
+
+            val macroFinder = Regex(macros.keys.joinToString("|") { Regex.escape(it) })
+            val result = StringBuilder()
+            var lastEnd = 0
+            for (match in macroFinder.findAll(version)) {
+                result.append(Regex.escape(version.substring(lastEnd, match.range.first)))
+                result.append(macros.getValue(match.value))
+                lastEnd = match.range.last + 1
+            }
+            result.append(Regex.escape(version.substring(lastEnd)))
+            result.toString()
         }
 
         private val detectRegexMap by lazy { ConcurrentHashMap<String, Regex>() }

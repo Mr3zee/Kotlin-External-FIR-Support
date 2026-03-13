@@ -440,6 +440,40 @@ class MyPluginTest : BasePlatformTestCase() {
         }
     }
 
+    /**
+     * Regression test: version pattern with literal regex metacharacters (`.` and `+`)
+     * in non-macro segments must be treated as literal characters, not regex operators.
+     * Tests extractLibVersion() and getDetectPattern() directly to bypass glob filtering.
+     */
+    fun testReplacementRegexEscapesMetacharacters() {
+        // Pattern: <kotlin-version>+build.1-<lib-version>
+        // The `+` and `.` between macros are literal and must not be regex-interpreted.
+        val replacement = KotlinPluginDescriptor.Replacement(
+            version = "<kotlin-version>+build.1-<lib-version>",
+            detect = "<artifact-id>",
+            search = "my-plugin-<artifact-id>",
+        )
+        val artifact = MavenId("com.example:core")
+
+        // extractLibVersion: should match literal +build.1-
+        assertEquals(
+            "3.0.0",
+            replacement.extractLibVersion("my-plugin-core-2.2.0+build.1-3.0.0.jar", artifact),
+        )
+
+        // extractLibVersion: must NOT match when . acts as wildcard and + as quantifier
+        assertNull(
+            replacement.extractLibVersion("my-plugin-core-2.2.0XbuildX1-3.0.0.jar", artifact),
+        )
+
+        // getDetectPattern: should match literal +build.1-
+        val detectPattern = replacement.getDetectPattern(artifact)
+        assertTrue(detectPattern.matches("core-2.2.0+build.1-3.0.0"))
+
+        // getDetectPattern: must NOT match metacharacter-substituted variant
+        assertFalse(detectPattern.matches("core-2.2.0XbuildX1-3.0.0"))
+    }
+
     private suspend fun loadAndAnalyzeJar(name: String): Set<String> {
         val jarUrl = MyPluginTest::class.java.getResource("/$name")
             ?: error("Failed to load jar")
