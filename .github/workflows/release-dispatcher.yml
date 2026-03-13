@@ -65,10 +65,11 @@ jobs:
         id: release-body
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_BODY: ${{ github.event.release.body }}
         run: |
           TAG="${{ steps.resolve-tag.outputs.tag }}"
           if [[ "${{ github.event_name }}" == "release" ]]; then
-            BODY="${{ github.event.release.body }}"
+            BODY="$RELEASE_BODY"
           else
             BODY=$(gh release view "$TAG" --json body -q '.body')
           fi
@@ -76,7 +77,7 @@ jobs:
             echo "has_body=true" >> $GITHUB_OUTPUT
             RELEASE_NOTE="./build/tmp/release_note.txt"
             mkdir -p "$(dirname "$RELEASE_NOTE")"
-            echo "$BODY" > "$RELEASE_NOTE"
+            printf '%s\n' "$BODY" > "$RELEASE_NOTE"
           else
             echo "has_body=false" >> $GITHUB_OUTPUT
           fi
