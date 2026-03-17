@@ -308,4 +308,113 @@ class KefsSettingsSerializerTest {
         assertEquals(1, resultPlugin.repositories.size)
         assertEquals("existing", resultPlugin.repositories[0].name)
     }
+
+    // --- withDefaults / withoutDefaults tests ---
+
+    @Test
+    fun `withoutDefaults strips entries matching defaults`() {
+        val state = KefsSettings.State(
+            repositories = DefaultState.repositories,
+            plugins = DefaultState.plugins,
+        )
+
+        val stripped = state.withoutDefaults()
+
+        assertTrue(stripped.repositories.isEmpty())
+        assertTrue(stripped.plugins.isEmpty())
+    }
+
+    @Test
+    fun `withoutDefaults keeps custom entries`() {
+        val customRepo = KotlinArtifactsRepository("my-repo", "https://custom.com", KotlinArtifactsRepository.Type.URL)
+        val customPlugin = KotlinPluginDescriptor(
+            name = "custom-plugin",
+            ids = listOf(MavenId("org.custom:artifact")),
+            versionMatching = KotlinPluginDescriptor.VersionMatching.LATEST,
+            enabled = true,
+            ignoreExceptions = false,
+            repositories = emptyList(),
+            replacement = null,
+        )
+        val state = KefsSettings.State(
+            repositories = DefaultState.repositories + customRepo,
+            plugins = DefaultState.plugins + customPlugin,
+        )
+
+        val stripped = state.withoutDefaults()
+
+        assertEquals(1, stripped.repositories.size)
+        assertEquals("my-repo", stripped.repositories[0].name)
+        assertEquals(1, stripped.plugins.size)
+        assertEquals("custom-plugin", stripped.plugins[0].name)
+    }
+
+    @Test
+    fun `withoutDefaults keeps modified default entries`() {
+        val defaultPlugin = DefaultState.plugins.first()
+        val modified = defaultPlugin.copy(enabled = false)
+        val state = KefsSettings.State(
+            repositories = DefaultState.repositories,
+            plugins = listOf(modified),
+        )
+
+        val stripped = state.withoutDefaults()
+
+        assertTrue(stripped.repositories.isEmpty())
+        assertEquals(1, stripped.plugins.size)
+        assertEquals(defaultPlugin.name, stripped.plugins[0].name)
+        assertFalse(stripped.plugins[0].enabled)
+    }
+
+    @Test
+    fun `withDefaults restores defaults into empty stored state`() {
+        val empty = KefsSettings.StoredState()
+        val withDefaults = empty.asState().withDefaults()
+
+        assertEquals(DefaultState.repositories.size, withDefaults.repositories.size)
+        assertEquals(DefaultState.plugins.size, withDefaults.plugins.size)
+        for (defaultRepo in DefaultState.repositories) {
+            assertTrue(withDefaults.repositories.any { it.name == defaultRepo.name })
+        }
+        for (defaultPlugin in DefaultState.plugins) {
+            assertTrue(withDefaults.plugins.any { it.name == defaultPlugin.name })
+        }
+    }
+
+    @Test
+    fun `withDefaults merges custom entries with defaults`() {
+        val custom = KefsSettings.StoredState(
+            repositories = mapOf("my-repo" to "https://custom.com;URL"),
+            plugins = mapOf("custom-plugin" to "LATEST;true;false;org.custom:artifact"),
+        )
+        val withDefaults = custom.asState().withDefaults()
+
+        // Has both default and custom repos
+        assertTrue(withDefaults.repositories.any { it.name == "my-repo" })
+        for (defaultRepo in DefaultState.repositories) {
+            assertTrue(withDefaults.repositories.any { it.name == defaultRepo.name })
+        }
+    }
+
+    @Test
+    fun `round-trip withoutDefaults then withDefaults preserves full state`() {
+        val customRepo = KotlinArtifactsRepository("my-repo", "https://custom.com", KotlinArtifactsRepository.Type.URL)
+        val fullState = KefsSettings.State(
+            repositories = DefaultState.repositories + customRepo,
+            plugins = DefaultState.plugins,
+        )
+
+        val stripped = fullState.withoutDefaults()
+        val restoredStored = stripped.asStored()
+        val restored = restoredStored.asState().withDefaults()
+
+        assertEquals(fullState.repositories.size, restored.repositories.size)
+        assertEquals(fullState.plugins.size, restored.plugins.size)
+        for (repo in fullState.repositories) {
+            assertTrue(restored.repositories.any { it.name == repo.name && it.value == repo.value })
+        }
+        for (plugin in fullState.plugins) {
+            assertTrue(restored.plugins.any { it.name == plugin.name })
+        }
+    }
 }

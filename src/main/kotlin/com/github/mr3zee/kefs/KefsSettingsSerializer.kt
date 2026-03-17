@@ -1,5 +1,22 @@
 package com.github.mr3zee.kefs
 
+internal fun KefsSettings.State.withDefaults(): KefsSettings.State {
+    val reposWithDefaults = DefaultState.repositories + repositories
+    val pluginsWithDefaults = DefaultState.plugins + plugins
+    return KefsSettings.State(reposWithDefaults.toList(), pluginsWithDefaults.toList()).distinct()
+}
+
+internal fun KefsSettings.State.withoutDefaults(): KefsSettings.State {
+    return KefsSettings.State(
+        repositories = repositories.filter { repo ->
+            DefaultState.repositoryMap[repo.name] != repo
+        },
+        plugins = plugins.filter { plugin ->
+            DefaultState.pluginMap[plugin.name] != plugin
+        },
+    )
+}
+
 internal fun KefsSettings.State.distinct(): KefsSettings.State {
     val distinctRepositories = repositories.distinctBy { it.name }
     val distinctRepositoriesNames = distinctRepositories.map { it.name }.toSet()

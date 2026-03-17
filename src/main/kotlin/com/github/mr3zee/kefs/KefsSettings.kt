@@ -10,7 +10,6 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.jetbrains.rd.util.ConcurrentHashMap
 import java.nio.file.Path
-import kotlin.collections.distinctBy
 
 @Service(Service.Level.PROJECT)
 @State(
@@ -23,26 +22,22 @@ import kotlin.collections.distinctBy
 )
 internal class KefsSettings(
     private val project: Project,
-) : SerializablePersistentStateComponent<KefsSettings.StoredState>(
-    State(
-        repositories = DefaultState.repositories,
-        plugins = DefaultState.plugins,
-    ).asStored()
-) {
+) : SerializablePersistentStateComponent<KefsSettings.StoredState>(StoredState()) {
     private val logger by lazy { thisLogger() }
 
     private fun updateWithDetectChanges(updateFunction: (currentState: State) -> State): State {
         val currentState = state
+        val fullState = updateFunction(currentState.asState().withDefaults())
 
         val newState = updateState {
-            updateFunction(currentState.asState()).asStored()
+            fullState.withoutDefaults().asStored()
         }
 
         if (currentState != newState) {
             project.service<KefsStorage>().clearState()
         }
 
-        return newState.asState()
+        return fullState
     }
 
     init {
