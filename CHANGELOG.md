@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-03-17
+
 ### Fixed
 
 - Fix infinite loop on Windows where file watcher ENTRY_DELETE events during jar downloads triggered `clearState()`, cancelling the running locator and restarting it indefinitely
@@ -179,7 +181,8 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.2.0...v0.3.0
