@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix infinite loop on Windows where file watcher ENTRY_DELETE events during jar downloads triggered `clearState()`, cancelling the running locator and restarting it indefinitely
+- Fix orphaned `.downloading` temp files not being cleaned up when the locator coroutine is cancelled
+- Fix downloaded JAR files not being verified against their expected MD5 checksum, allowing corrupted transfers to be silently cached
+- Fix `moved()` rename failure for a single artifact (e.g., Windows file lock) aborting the entire bundle instead of falling through gracefully
+
+### Added
+
+- SNAPSHOT version support: requested `-SNAPSHOT` versions now resolve against timestamped versions in Maven repositories, with automatic version-level metadata resolution for download filenames
+
+### Changed
+
+- File watcher self-update suppression now uses a 2-second grace period after `markSelfUpdateEnd()` to absorb delayed OS event delivery
+
 ## [0.3.2] - 2026-03-13
 
 ### Fixed
