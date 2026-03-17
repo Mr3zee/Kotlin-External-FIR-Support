@@ -347,6 +347,8 @@ internal object KefsJarLocator {
 
                 // some moves failed — update cached with any successfully moved results,
                 // fall through to accumulate path which will mark them as incomplete
+                val movedCount = moved.count { (_, r) -> (r as LocatorResult.Cached).jar.path.extension != DOWNLOADING_EXTENSION }
+                logger.debug("$logTag Partial move: $movedCount/${moved.size} artifacts moved successfully, falling through to incomplete path")
                 moved.forEach { (id, result) -> cached[id] = result as LocatorResult.Cached }
             }
         }
@@ -488,7 +490,7 @@ internal object KefsJarLocator {
             classifiedFilename = "${manifest.mavenId.artifactId}-$resolvedArtifactVersion${manifest.jarClassifier}.jar"
         }
 
-        logger.debug("Resolved artifact version: $artifactVersion, jar: $plainFilename")
+        logger.debug("$logTag Resolved artifact version: $artifactVersion, jar: $plainFilename, classifier: '${manifest.jarClassifier}'")
 
         val checksumResult = getChecksum(
             logTag = logTag,
@@ -683,6 +685,7 @@ internal object KefsJarLocator {
             result
         } finally {
             if (result !is LocatorResult.Cached) {
+                logger.debug("$logTag Cleaning up temporary file $file (result: ${result?.let { it::class.simpleName } ?: "cancelled"})")
                 withContext(NonCancellable + Dispatchers.IO) {
                     try {
                         file.deleteIfExists()
@@ -800,10 +803,13 @@ internal object KefsJarLocator {
         val jarPath = artifactPath.resolve(artifactVersion).resolve(artifactName)
 
         if (!jarPath.exists()) {
+            logger.debug("Local artifact not found: ${jarPath.absolutePathString()}")
             return@io LocatorResult.NotFound(
                 state = ArtifactState.NotFound("File does not exist: ${jarPath.absolutePathString()}"),
             )
         }
+
+        logger.debug("Copying local artifact: ${jarPath.absolutePathString()} -> ${file.absolutePathString()}")
 
         try {
             Files.copy(jarPath, file, StandardCopyOption.REPLACE_EXISTING)
@@ -1115,6 +1121,8 @@ internal object KefsJarLocator {
                         parseSnapshotMetadata(xml, snapshotArtifactVersion).also {
                             if (it != null) {
                                 logger.debug("$logTag Resolved remote SNAPSHOT version: $snapshotArtifactVersion -> $it")
+                            } else {
+                                logger.debug("$logTag Failed to parse remote SNAPSHOT metadata from $metadataUrl")
                             }
                         }
                     } else {
@@ -1131,6 +1139,7 @@ internal object KefsJarLocator {
 
             is ArtifactManifest.Locator.ByPath -> {
                 val metadataDir = manifest.locator.path.resolve(snapshotArtifactVersion)
+                logger.debug("$logTag Looking for SNAPSHOT metadata in $metadataDir")
                 io {
                     for (name in metadataFiles) {
                         val metadataPath = metadataDir.resolve(name)
@@ -1139,13 +1148,17 @@ internal object KefsJarLocator {
                                 parseSnapshotMetadata(metadataPath.readText(), snapshotArtifactVersion).also {
                                     if (it != null) {
                                         logger.debug("$logTag Resolved local SNAPSHOT version: $snapshotArtifactVersion -> $it")
+                                    } else {
+                                        logger.debug("$logTag Failed to parse SNAPSHOT metadata from $metadataPath")
                                     }
                                 }
-                            } catch (_: Exception) {
+                            } catch (e: Exception) {
+                                logger.debug("$logTag Failed to read SNAPSHOT metadata from $metadataPath: ${e.message}")
                                 null
                             }
                         }
                     }
+                    logger.debug("$logTag No SNAPSHOT metadata found in $metadataDir, falling back to SNAPSHOT filename")
                     null
                 }
             }

@@ -103,8 +103,13 @@ internal class KefsFileWatcher(
         if (!key.isValid || path == null) {
             val root = path?.let { watchedDirToRoot[it] }
             deregisterWatchedDir(path)
-            if (root != null && !isLocalRepoRoot(root) && !isSelfUpdating()) {
-                callback.onCacheDirExternalChange()
+            if (root != null && !isLocalRepoRoot(root)) {
+                if (!isSelfUpdating()) {
+                    logger.debug("File watcher: invalid key for cache dir $path, triggering external change")
+                    callback.onCacheDirExternalChange()
+                } else {
+                    logger.debug("File watcher: invalid key for cache dir $path suppressed (self-updating)")
+                }
             }
             return true
         }
@@ -133,7 +138,10 @@ internal class KefsFileWatcher(
                 StandardWatchEventKinds.ENTRY_DELETE -> {
                     if (isCacheDir) {
                         if (!isSelfUpdating()) {
+                            logger.debug("File watcher: cache dir DELETE event for $contextName, triggering external change")
                             callback.onCacheDirExternalChange()
+                        } else {
+                            logger.debug("File watcher: cache dir DELETE event for $contextName suppressed (self-updating)")
                         }
                         key.reset()
                         return true
@@ -155,8 +163,10 @@ internal class KefsFileWatcher(
             callback.onLocalRepoChange(root)
         } else {
             if (!isSelfUpdating()) {
-                logger.debug("File watcher detected external changes in cache dir: ${events.map { it.context() }}")
+                logger.debug("File watcher detected external changes in cache dir: ${events.map { "${it.kind()}: ${it.context()}" }}")
                 callback.onCacheDirExternalChange()
+            } else {
+                logger.debug("File watcher: cache dir events suppressed (self-updating): ${events.map { "${it.kind()}: ${it.context()}" }}")
             }
         }
         key.reset()
