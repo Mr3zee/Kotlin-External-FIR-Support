@@ -36,6 +36,7 @@ internal class KefsFileWatcher(
     private val registeredRoots = ConcurrentHashMap.newKeySet<Path>()
     private val localRepoRoots = ConcurrentHashMap.newKeySet<Path>()
     private val cacheDirSelfUpdates = AtomicLong(0)
+    private val selfUpdateEndTimestamp = AtomicLong(0)
 
     private val logger by lazy { thisLogger() }
 
@@ -66,6 +67,23 @@ internal class KefsFileWatcher(
 
     fun markSelfUpdateEnd() {
         cacheDirSelfUpdates.decrementAndGet()
+        selfUpdateEndTimestamp.set(System.currentTimeMillis())
+    }
+
+    /**
+     * Returns true if the cache dir is currently being updated by the locator,
+     * or was updated recently (within a grace period to absorb delayed OS events).
+     */
+    private fun isSelfUpdating(): Boolean {
+        if (cacheDirSelfUpdates.get() > 0) return true
+        // Grace period to absorb delayed file watcher events delivered after the self-update ends.
+        // WatchService polls every 1s, and OS event delivery can be delayed further on Windows.
+        val elapsed = System.currentTimeMillis() - selfUpdateEndTimestamp.get()
+        return selfUpdateEndTimestamp.get() != 0L && elapsed < SELF_UPDATE_GRACE_PERIOD_MS
+    }
+
+    companion object {
+        internal const val SELF_UPDATE_GRACE_PERIOD_MS = 2000L
     }
 
     /**
@@ -85,7 +103,7 @@ internal class KefsFileWatcher(
         if (!key.isValid || path == null) {
             val root = path?.let { watchedDirToRoot[it] }
             deregisterWatchedDir(path)
-            if (root != null && !isLocalRepoRoot(root)) {
+            if (root != null && !isLocalRepoRoot(root) && !isSelfUpdating()) {
                 callback.onCacheDirExternalChange()
             }
             return true
@@ -114,7 +132,9 @@ internal class KefsFileWatcher(
 
                 StandardWatchEventKinds.ENTRY_DELETE -> {
                     if (isCacheDir) {
-                        callback.onCacheDirExternalChange()
+                        if (!isSelfUpdating()) {
+                            callback.onCacheDirExternalChange()
+                        }
                         key.reset()
                         return true
                     }
@@ -134,7 +154,7 @@ internal class KefsFileWatcher(
         if (!isCacheDir) {
             callback.onLocalRepoChange(root)
         } else {
-            if (cacheDirSelfUpdates.get() == 0L) {
+            if (!isSelfUpdating()) {
                 logger.debug("File watcher detected external changes in cache dir: ${events.map { it.context() }}")
                 callback.onCacheDirExternalChange()
             }

@@ -294,6 +294,50 @@ class KefsDiskScannerTest {
         assertEquals("2.1.0", result.jar.kotlinVersionMismatch!!.jarVersion)
     }
 
+    /**
+     * Verifies that .downloading files (incomplete downloads) are not picked up by the disk scanner.
+     * This is important because orphaned .downloading files can exist after cancelled downloads.
+     */
+    @Test
+    fun `findMatchingJar ignores downloading files`() {
+        val cacheDir = tempDir.resolve("cache").also { it.createDirectories() }
+        // Only .downloading files exist, no completed .jar
+        createJar(cacheDir, "my-artifact-2.2.0-1.0.0.jar.downloading")
+        createJar(cacheDir, "my-artifact-2.2.0-1.0.0.jar.metadata.json")
+
+        val result = KefsDiskScanner.findMatchingJar(
+            basePath = cacheDir,
+            artifact = MavenId("org.example:my-artifact"),
+            kotlinIdeVersion = "2.2.0",
+            replacement = null,
+            matchFilter = MatchFilter("1.0.0".requested(), KotlinPluginDescriptor.VersionMatching.EXACT),
+        )
+
+        assertNull("Should not find .downloading files", result)
+    }
+
+    /**
+     * Verifies that completed .jar files are found even when .downloading files coexist
+     * (e.g., from a partially failed bundle where some artifacts were renamed and others weren't).
+     */
+    @Test
+    fun `findMatchingJar finds jar when downloading files also present`() {
+        val cacheDir = tempDir.resolve("cache").also { it.createDirectories() }
+        createJar(cacheDir, "my-artifact-2.2.0-1.0.0.jar")
+        createJar(cacheDir, "my-artifact-2.2.0-1.1.0.jar.downloading")
+
+        val result = KefsDiskScanner.findMatchingJar(
+            basePath = cacheDir,
+            artifact = MavenId("org.example:my-artifact"),
+            kotlinIdeVersion = "2.2.0",
+            replacement = null,
+            matchFilter = MatchFilter("1.0.0".requested(), KotlinPluginDescriptor.VersionMatching.EXACT),
+        )
+
+        assertNotNull("Should find the completed .jar file", result)
+        assertEquals("1.0.0", result!!.first.value)
+    }
+
     // --- helpers ---
 
     private fun createJar(dir: Path, name: String) {

@@ -1,6 +1,7 @@
 package com.github.mr3zee.kefs
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.After
@@ -188,12 +189,120 @@ class KefsFileWatcherTest {
 
         assertEquals("Self-update should be suppressed", 0, cacheDirChangeCount.get())
 
+        // Wait for the self-update grace period to expire before making an external change
+        delay(KefsFileWatcher.SELF_UPDATE_GRACE_PERIOD_MS + 500)
+        // Drain any buffered events from the self-update that arrive during the grace period
+        processEventsFor(1500)
+        assertEquals("Events during grace period should be suppressed", 0, cacheDirChangeCount.get())
+
         // External change: should fire
         createFile(cacheDir.resolve("external.jar"), "external-content")
 
         awaitCondition { cacheDirChangeCount.get() > 0 }
 
         assertTrue("External change after self-update should trigger callback", cacheDirChangeCount.get() > 0)
+    }
+
+    /**
+     * Regression test: file DELETION during self-update must be suppressed.
+     * This was the root cause of the infinite loop on Windows where the locator's
+     * temp file cleanup triggered onCacheDirExternalChange -> clearState -> cancel locator.
+     */
+    @Test
+    fun testCacheDirSelfUpdateSuppressesDeleteEvents(): Unit = runBlocking {
+        // Create a file first, then delete it during self-update
+        val file = cacheDir.resolve("temp.jar.downloading")
+        createFile(file, "temp content")
+        awaitCondition { cacheDirChangeCount.get() > 0 }
+        cacheDirChangeCount.set(0)
+
+        watcher.markSelfUpdateStart()
+        try {
+            deleteFile(file)
+            processEventsFor(2000)
+        } finally {
+            watcher.markSelfUpdateEnd()
+        }
+
+        assertEquals("DELETE during self-update should be suppressed", 0, cacheDirChangeCount.get())
+    }
+
+    /**
+     * Regression test: multiple file operations (create + delete + create) during self-update
+     * must all be suppressed. This simulates the locator's workflow of cleaning up .downloading
+     * files and creating new ones.
+     */
+    @Test
+    fun testCacheDirSelfUpdateSuppressesMultipleOperations(): Unit = runBlocking {
+        watcher.markSelfUpdateStart()
+        try {
+            // Simulate locator workflow: create .downloading, then delete it, then create new one
+            val downloading = cacheDir.resolve("artifact.jar.downloading")
+            createFile(downloading, "partial download")
+            processEventsFor(500)
+            deleteFile(downloading)
+            processEventsFor(500)
+            createFile(downloading, "new download content")
+            processEventsFor(500)
+            // Simulate rename to final jar
+            val finalJar = cacheDir.resolve("artifact.jar")
+            withContext(Dispatchers.IO) {
+                java.nio.file.Files.move(downloading, finalJar)
+            }
+            processEventsFor(1000)
+        } finally {
+            watcher.markSelfUpdateEnd()
+        }
+
+        assertEquals("All operations during self-update should be suppressed", 0, cacheDirChangeCount.get())
+    }
+
+    /**
+     * Tests that the grace period after markSelfUpdateEnd() suppresses late-arriving events.
+     * OS file watchers (especially on Windows) can deliver events asynchronously after the
+     * file operations that caused them.
+     */
+    @Test
+    fun testGracePeriodSuppressesDelayedEvents(): Unit = runBlocking {
+        watcher.markSelfUpdateStart()
+        createFile(cacheDir.resolve("artifact.jar"), "content")
+        processEventsFor(500)
+        watcher.markSelfUpdateEnd()
+
+        // Immediately process events — these are "delayed" events from the self-update
+        // that arrive after markSelfUpdateEnd() but within the grace period
+        processEventsFor(1000)
+
+        assertEquals("Events during grace period should be suppressed", 0, cacheDirChangeCount.get())
+    }
+
+    /**
+     * Tests that external changes AFTER the grace period expires are properly detected.
+     */
+    @Test
+    fun testExternalDeleteAfterGracePeriodFires(): Unit = runBlocking {
+        // Create a file outside of self-update
+        val file = cacheDir.resolve("external.jar")
+        createFile(file, "content")
+        awaitCondition { cacheDirChangeCount.get() > 0 }
+        cacheDirChangeCount.set(0)
+
+        // Do a self-update cycle
+        watcher.markSelfUpdateStart()
+        createFile(cacheDir.resolve("self.jar"), "self")
+        processEventsFor(500)
+        watcher.markSelfUpdateEnd()
+
+        // Wait for grace period to expire
+        delay(KefsFileWatcher.SELF_UPDATE_GRACE_PERIOD_MS + 500)
+        processEventsFor(1500)
+        cacheDirChangeCount.set(0)
+
+        // Now delete a file — should trigger callback
+        deleteFile(file)
+        awaitCondition { cacheDirChangeCount.get() > 0 }
+
+        assertTrue("DELETE after grace period should trigger callback", cacheDirChangeCount.get() > 0)
     }
 
     @Test

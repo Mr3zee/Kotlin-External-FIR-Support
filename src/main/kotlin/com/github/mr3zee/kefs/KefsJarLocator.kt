@@ -1,7 +1,6 @@
 package com.github.mr3zee.kefs
 
 import com.intellij.openapi.diagnostic.thisLogger
-import com.intellij.util.io.delete
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.plugins.HttpRequestRetry
@@ -10,6 +9,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.utils.io.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.io.readByteArray
 import kotlinx.serialization.Serializable
@@ -328,7 +328,26 @@ internal object KefsJarLocator {
 
             if (cached.size == versioned.descriptor.ids.size) {
                 // only move when all are found
-                return BundleResult(cached.mapValues { it.value.moved() })
+                var allMoved = true
+                val moved = cached.mapValues { (_, result) ->
+                    try {
+                        result.moved()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.debug("Failed to move artifact ${result.jar.path}: ${e::class}: ${e.message}")
+                        allMoved = false
+                        result // keep the original .downloading result for cleanup
+                    }
+                }
+
+                if (allMoved) {
+                    return BundleResult(moved)
+                }
+
+                // some moves failed — update cached with any successfully moved results,
+                // fall through to accumulate path which will mark them as incomplete
+                moved.forEach { (id, result) -> cached[id] = result as LocatorResult.Cached }
             }
         }
 
@@ -649,8 +668,12 @@ internal object KefsJarLocator {
             result
         } finally {
             if (result !is LocatorResult.Cached) {
-                runCatchingExceptCancellation { io { file.delete() } }.onFailure { e ->
-                    logger.debug("Failed to delete temporary file $file: ${e::class}: ${e.message}")
+                withContext(NonCancellable + Dispatchers.IO) {
+                    try {
+                        file.deleteIfExists()
+                    } catch (e: Exception) {
+                        logger.debug("Failed to delete temporary file $file: ${e::class}: ${e.message}")
+                    }
                 }
             }
         }
@@ -720,12 +743,24 @@ internal object KefsJarLocator {
         )
 
         return when (downloadResult) {
-            is DownloadResult.Success -> LocatorResult.Cached(
-                jar = Jar(file, checksum, isLocal = false, kotlinVersionMismatch = null),
-                filter = filter,
-                origin = origin,
-                resolvedVersion = resolvedVersion,
-            )
+            is DownloadResult.Success -> {
+                val actualChecksum = io { md5(file).asChecksum() }
+                if (actualChecksum != checksum) {
+                    logger.debug("$logTag Checksum mismatch for $artifactName: expected $checksum, got $actualChecksum")
+                    LocatorResult.FailedToFetch(
+                        state = ArtifactState.FailedToFetch(
+                            "Checksum mismatch for $artifactName from $url: expected $checksum, got $actualChecksum"
+                        ),
+                    )
+                } else {
+                    LocatorResult.Cached(
+                        jar = Jar(file, checksum, isLocal = false, kotlinVersionMismatch = null),
+                        filter = filter,
+                        origin = origin,
+                        resolvedVersion = resolvedVersion,
+                    )
+                }
+            }
 
             is DownloadResult.NotFound -> LocatorResult.NotFound(
                 state = ArtifactState.NotFound("File not found: $url"),
