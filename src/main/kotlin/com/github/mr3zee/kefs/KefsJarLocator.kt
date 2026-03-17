@@ -460,15 +460,22 @@ internal object KefsJarLocator {
             artifactVersion = replacement.getVersionString(manifest.kotlinIdeVersion, resolvedVersion.value)
             val blueprint = replacement.getArtifactString(manifest.mavenId)
 
-            filename = "$blueprint-$artifactVersion.jar.$DOWNLOADING_EXTENSION"
-            plainFilename = "$blueprint-$artifactVersion.jar"
-            metadataFilename = "$blueprint-$artifactVersion.jar.$METADATA_EXTENSION"
-            classifiedFilename = "$blueprint-$artifactVersion${manifest.jarClassifier}.jar"
+            // For SNAPSHOT versions, resolve the actual timestamped filename from version-level metadata.
+            // Maven SNAPSHOT repos use directory name X.Y.Z-SNAPSHOT/ but files inside have timestamped names.
+            val resolvedArtifactVersion = if (artifactVersion.endsWith("-SNAPSHOT")) {
+                resolveSnapshotVersion(logTag, manifest, artifactVersion) ?: artifactVersion
+            } else {
+                artifactVersion
+            }
+
+            filename = "$blueprint-$resolvedArtifactVersion.jar.$DOWNLOADING_EXTENSION"
+            plainFilename = "$blueprint-$resolvedArtifactVersion.jar"
+            metadataFilename = "$blueprint-$resolvedArtifactVersion.jar.$METADATA_EXTENSION"
+            classifiedFilename = "$blueprint-$resolvedArtifactVersion${manifest.jarClassifier}.jar"
         } else {
             artifactVersion = "${manifest.kotlinIdeVersion}-$resolvedVersion"
 
             // For SNAPSHOT versions, resolve the actual timestamped filename from version-level metadata.
-            // Maven SNAPSHOT repos use directory name X.Y.Z-SNAPSHOT/ but files inside have timestamped names.
             val resolvedArtifactVersion = if (artifactVersion.endsWith("-SNAPSHOT")) {
                 resolveSnapshotVersion(logTag, manifest, artifactVersion) ?: artifactVersion
             } else {
