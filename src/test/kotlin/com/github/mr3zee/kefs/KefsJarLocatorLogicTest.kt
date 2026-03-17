@@ -229,4 +229,54 @@ class KefsJarLocatorLogicTest {
             java.nio.file.Files.deleteIfExists(file2)
         }
     }
+
+    // -- parseSnapshotMetadata tests --
+
+    @Test
+    fun `parseSnapshotMetadata extracts timestamp and build number`() {
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <metadata>
+              <groupId>org.example</groupId>
+              <artifactId>my-artifact</artifactId>
+              <version>2.2.0-1.0.0-SNAPSHOT</version>
+              <versioning>
+                <snapshot>
+                  <timestamp>20260316.123456</timestamp>
+                  <buildNumber>3</buildNumber>
+                </snapshot>
+                <lastUpdated>20260316123456</lastUpdated>
+              </versioning>
+            </metadata>
+        """.trimIndent()
+
+        val result = parseSnapshotMetadata(xml, "2.2.0-1.0.0-SNAPSHOT")
+
+        assertEquals("2.2.0-1.0.0-20260316.123456-3", result)
+    }
+
+    @Test
+    fun `parseSnapshotMetadata returns null for missing snapshot element`() {
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <metadata>
+              <groupId>org.example</groupId>
+              <artifactId>my-artifact</artifactId>
+              <versioning>
+                <lastUpdated>20260316123456</lastUpdated>
+              </versioning>
+            </metadata>
+        """.trimIndent()
+
+        val result = parseSnapshotMetadata(xml, "2.2.0-1.0.0-SNAPSHOT")
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `parseSnapshotMetadata returns null for malformed XML`() {
+        val result = parseSnapshotMetadata("not xml", "2.2.0-1.0.0-SNAPSHOT")
+
+        assertNull(result)
+    }
 }

@@ -204,16 +204,35 @@ internal fun getMatching(
         return filter.requestedVersion.asResolvedForDiskSearch()
     }
 
+    // SNAPSHOT: if requested version is X.Y.Z-SNAPSHOT, match against timestamped versions (X.Y.Z-YYYYMMDD.HHMMSS-N)
+    // Find the latest timestamped version that is present in ALL artifact lists.
+    val snapshotBase = filter.requestedVersion.value.snapshotBaseOrNull()
+    if (snapshotBase != null) {
+        val snapshotVersionSets = transformed.map { versionsPerArtifact ->
+            versionsPerArtifact.filter { it.toString().isSnapshotOf(snapshotBase) }
+                .map { it.toString() }
+                .toSet()
+        }
+        if (snapshotVersionSets.all { it.isNotEmpty() }) {
+            val common = snapshotVersionSets.reduce { acc, set -> acc.intersect(set) }
+            val latest = common.maxByOrNull { MavenComparableVersion(it) }
+            if (latest != null) {
+                return latest.resolved()
+            }
+        }
+    }
+
     return when (filter.matching) {
         KotlinPluginDescriptor.VersionMatching.LATEST -> {
             transformed.map { it.maxOrNull() }.distinct().singleOrNull()
         }
 
         KotlinPluginDescriptor.VersionMatching.SAME_MAJOR -> {
-            val major = filter.requestedVersion.value.substringBefore(".").takeIf {
+            val requestedValue = snapshotBase ?: filter.requestedVersion.value
+            val major = requestedValue.substringBefore(".").takeIf {
                 it != "0"
             }
-            val minor = filter.requestedVersion.value.substringAfter(".").substringBefore(".")
+            val minor = requestedValue.substringAfter(".").substringBefore(".")
 
             transformed
                 .map { versionsPerArtifact ->
@@ -237,9 +256,39 @@ internal fun getMatching(
     }.atLeast(filter.requestedVersion)
 }
 
+private val SNAPSHOT_TIMESTAMP_REGEX = "\\d{8}\\.\\d{6}-\\d+".toRegex()
+
+/**
+ * If this string ends with "-SNAPSHOT", returns the base version (without "-SNAPSHOT").
+ * Otherwise returns null.
+ */
+internal fun String.snapshotBaseOrNull(): String? {
+    return if (endsWith("-SNAPSHOT")) removeSuffix("-SNAPSHOT") else null
+}
+
+/**
+ * Returns true if this version string is a timestamped snapshot of the given base version.
+ * E.g. "0.11.0-20260316.123456-1".isSnapshotOf("0.11.0") == true
+ */
+internal fun String.isSnapshotOf(base: String): Boolean {
+    if (!startsWith("$base-")) return false
+    val suffix = removePrefix("$base-")
+    return SNAPSHOT_TIMESTAMP_REGEX.matches(suffix)
+}
+
 private fun MavenComparableVersion?.atLeast(version: RequestedVersion): ResolvedVersion? {
     if (this == null) {
         return null
+    }
+
+    // For SNAPSHOT requests, skip the atLeast check since the SNAPSHOT qualifier
+    // sorts lower than timestamped versions in Maven comparison
+    if (version.value.endsWith("-SNAPSHOT")) {
+        val base = version.value.snapshotBaseOrNull()!!
+        val thisStr = this.toString()
+        if (thisStr == version.value || thisStr.isSnapshotOf(base)) {
+            return thisStr.resolved()
+        }
     }
 
     return if (this >= MavenComparableVersion(version.value)) this.toString().resolved() else null

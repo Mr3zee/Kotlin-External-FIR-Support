@@ -78,8 +78,8 @@ internal class KefsFileWatcher(
         if (cacheDirSelfUpdates.get() > 0) return true
         // Grace period to absorb delayed file watcher events delivered after the self-update ends.
         // WatchService polls every 1s, and OS event delivery can be delayed further on Windows.
-        val elapsed = System.currentTimeMillis() - selfUpdateEndTimestamp.get()
-        return selfUpdateEndTimestamp.get() != 0L && elapsed < SELF_UPDATE_GRACE_PERIOD_MS
+        val ts = selfUpdateEndTimestamp.get()
+        return ts != 0L && System.currentTimeMillis() - ts < SELF_UPDATE_GRACE_PERIOD_MS
     }
 
     companion object {

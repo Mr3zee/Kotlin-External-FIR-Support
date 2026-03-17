@@ -233,6 +233,154 @@ class VersionMatchingTest {
         assertEquals("2.2.0-", defaultPrefix)
     }
 
+    // --- SNAPSHOT matching ---
+
+    @Test
+    fun `SNAPSHOT exact match works when metadata lists SNAPSHOT version`() {
+        val versions = listOf(listOf("2.2.0-1.0.0-SNAPSHOT", "2.2.0-1.0.0"))
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.EXACT)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNotNull(result)
+        assertEquals("1.0.0-SNAPSHOT", result!!.value)
+    }
+
+    @Test
+    fun `SNAPSHOT matches timestamped version in metadata`() {
+        val versions = listOf(listOf("2.2.0-1.0.0-20260316.123456-1", "2.2.0-1.0.0"))
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.EXACT)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNotNull("SNAPSHOT should match timestamped version", result)
+        assertEquals("1.0.0-20260316.123456-1", result!!.value)
+    }
+
+    @Test
+    fun `SNAPSHOT matches latest timestamped version across multiple artifacts`() {
+        val versions = listOf(
+            listOf("2.2.0-1.0.0-20260316.123456-1", "2.2.0-1.0.0-20260317.654321-2"),
+            listOf("2.2.0-1.0.0-20260316.123456-1", "2.2.0-1.0.0-20260317.654321-2"),
+        )
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.EXACT)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNotNull(result)
+        assertEquals("1.0.0-20260317.654321-2", result!!.value)
+    }
+
+    @Test
+    fun `SNAPSHOT does not match unrelated versions with same base`() {
+        // "1.0.0-beta1" should NOT match "1.0.0-SNAPSHOT"
+        val versions = listOf(listOf("2.2.0-1.0.0-beta1", "2.2.0-1.0.0-rc1"))
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.EXACT)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNull("SNAPSHOT should not match non-snapshot qualifiers", result)
+    }
+
+    @Test
+    fun `SNAPSHOT returns null when no matching versions exist`() {
+        val versions = listOf(listOf("2.2.0-2.0.0", "2.2.0-3.0.0"))
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.EXACT)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `SNAPSHOT with different max picks latest common version`() {
+        val versions = listOf(
+            listOf("2.2.0-1.0.0-20260316.123456-1", "2.2.0-1.0.0-20260317.654321-2"),
+            listOf("2.2.0-1.0.0-20260316.123456-1"), // only has the older one
+        )
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.EXACT)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNotNull("Should find the latest common snapshot version", result)
+        assertEquals("1.0.0-20260316.123456-1", result!!.value)
+    }
+
+    @Test
+    fun `SNAPSHOT with no common timestamps across artifacts returns null`() {
+        val versions = listOf(
+            listOf("2.2.0-1.0.0-20260316.123456-1"),
+            listOf("2.2.0-1.0.0-20260317.654321-2"), // completely disjoint
+        )
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.EXACT)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNull("No common snapshot versions should return null", result)
+    }
+
+    @Test
+    fun `SNAPSHOT with LATEST matching falls through to timestamp matching`() {
+        val versions = listOf(listOf("2.2.0-1.0.0-20260316.123456-1"))
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.LATEST)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNotNull(result)
+        assertEquals("1.0.0-20260316.123456-1", result!!.value)
+    }
+
+    @Test
+    fun `SNAPSHOT with SAME_MAJOR resolves regular version in same major`() {
+        // Request 1.0.0-SNAPSHOT with SAME_MAJOR, only 1.5.0 available (no snapshot timestamps)
+        val versions = listOf(listOf("2.2.0-1.5.0", "2.2.0-2.0.0"))
+        val filter = MatchFilter("1.0.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.SAME_MAJOR)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNotNull("SAME_MAJOR should find version in major 1", result)
+        assertEquals("1.5.0", result!!.value)
+    }
+
+    @Test
+    fun `SNAPSHOT with SAME_MAJOR and 0-dot-x matches by minor`() {
+        val versions = listOf(listOf("2.2.0-0.11.0", "2.2.0-0.11.5", "2.2.0-0.12.0"))
+        val filter = MatchFilter("0.11.0-SNAPSHOT".requested(), KotlinPluginDescriptor.VersionMatching.SAME_MAJOR)
+
+        val result = getMatching(versions, "2.2.0-", filter)
+
+        assertNotNull("SAME_MAJOR with 0.x should match by minor", result)
+        assertEquals("0.11.5", result!!.value)
+    }
+
+    // --- SNAPSHOT helper tests ---
+
+    @Test
+    fun `snapshotBaseOrNull returns base for SNAPSHOT version`() {
+        assertEquals("1.0.0", "1.0.0-SNAPSHOT".snapshotBaseOrNull())
+        assertEquals("0.11.0-grpc", "0.11.0-grpc-SNAPSHOT".snapshotBaseOrNull())
+    }
+
+    @Test
+    fun `snapshotBaseOrNull returns null for non-SNAPSHOT version`() {
+        assertNull("1.0.0".snapshotBaseOrNull())
+        assertNull("1.0.0-beta1".snapshotBaseOrNull())
+    }
+
+    @Test
+    fun `isSnapshotOf matches timestamped versions`() {
+        assertTrue("0.11.0-20260316.123456-1".isSnapshotOf("0.11.0"))
+        assertTrue("1.0.0-20261231.235959-99".isSnapshotOf("1.0.0"))
+    }
+
+    @Test
+    fun `isSnapshotOf rejects non-timestamp suffixes`() {
+        assertFalse("0.11.0-beta1".isSnapshotOf("0.11.0"))
+        assertFalse("0.11.0-SNAPSHOT".isSnapshotOf("0.11.0"))
+        assertFalse("0.11.0".isSnapshotOf("0.11.0"))
+        assertFalse("0.12.0-20260316.123456-1".isSnapshotOf("0.11.0"))
+    }
+
     // --- JarId equality ---
 
     @Test

@@ -467,10 +467,18 @@ internal object KefsJarLocator {
         } else {
             artifactVersion = "${manifest.kotlinIdeVersion}-$resolvedVersion"
 
-            filename = "${manifest.mavenId.artifactId}-$artifactVersion.jar.$DOWNLOADING_EXTENSION"
-            plainFilename = "${manifest.mavenId.artifactId}-$artifactVersion.jar"
-            metadataFilename = "${manifest.mavenId.artifactId}-$artifactVersion.jar.$METADATA_EXTENSION"
-            classifiedFilename = "${manifest.mavenId.artifactId}-$artifactVersion${manifest.jarClassifier}.jar"
+            // For SNAPSHOT versions, resolve the actual timestamped filename from version-level metadata.
+            // Maven SNAPSHOT repos use directory name X.Y.Z-SNAPSHOT/ but files inside have timestamped names.
+            val resolvedArtifactVersion = if (artifactVersion.endsWith("-SNAPSHOT")) {
+                resolveSnapshotVersion(logTag, manifest, artifactVersion) ?: artifactVersion
+            } else {
+                artifactVersion
+            }
+
+            filename = "${manifest.mavenId.artifactId}-$resolvedArtifactVersion.jar.$DOWNLOADING_EXTENSION"
+            plainFilename = "${manifest.mavenId.artifactId}-$resolvedArtifactVersion.jar"
+            metadataFilename = "${manifest.mavenId.artifactId}-$resolvedArtifactVersion.jar.$METADATA_EXTENSION"
+            classifiedFilename = "${manifest.mavenId.artifactId}-$resolvedArtifactVersion${manifest.jarClassifier}.jar"
         }
 
         logger.debug("Resolved artifact version: $artifactVersion, jar: $plainFilename")
@@ -1078,6 +1086,65 @@ internal object KefsJarLocator {
         )
     }
 
+    /**
+     * For SNAPSHOT versions, resolves the actual timestamped version from version-level maven-metadata.xml.
+     * Maven SNAPSHOT repos store files with timestamped names (e.g., artifact-1.0.0-20260316.123456-1.jar)
+     * in a directory named with the SNAPSHOT version (e.g., artifact/1.0.0-SNAPSHOT/).
+     *
+     * Returns the timestamped version string, or null if resolution fails (falls back to SNAPSHOT name).
+     */
+    private suspend fun resolveSnapshotVersion(
+        logTag: String,
+        manifest: ArtifactManifest,
+        snapshotArtifactVersion: String,
+    ): String? {
+        return when (manifest.locator) {
+            is ArtifactManifest.Locator.ByUrl -> {
+                val metadataUrl = "${manifest.locator.url}/$snapshotArtifactVersion/maven-metadata.xml"
+                try {
+                    val response = client.get(metadataUrl)
+                    if (response.status.isSuccess()) {
+                        val xml = response.bodyAsText()
+                        parseSnapshotMetadata(xml, snapshotArtifactVersion).also {
+                            if (it != null) {
+                                logger.debug("$logTag Resolved remote SNAPSHOT version: $snapshotArtifactVersion -> $it")
+                            }
+                        }
+                    } else {
+                        logger.debug("$logTag SNAPSHOT metadata not found at $metadataUrl (${response.status})")
+                        null
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.debug("$logTag Failed to resolve SNAPSHOT metadata from $metadataUrl: ${e.message}")
+                    null
+                }
+            }
+
+            is ArtifactManifest.Locator.ByPath -> {
+                val metadataDir = manifest.locator.path.resolve(snapshotArtifactVersion)
+                io {
+                    for (name in metadataFiles) {
+                        val metadataPath = metadataDir.resolve(name)
+                        if (metadataPath.exists()) {
+                            return@io try {
+                                parseSnapshotMetadata(metadataPath.readText(), snapshotArtifactVersion).also {
+                                    if (it != null) {
+                                        logger.debug("$logTag Resolved local SNAPSHOT version: $snapshotArtifactVersion -> $it")
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                    }
+                    null
+                }
+            }
+        }
+    }
+
     private fun BundleResult.logStatus(logTag: String) {
         locatorResults.forEach { (id, result) ->
             when (result) {
@@ -1137,6 +1204,35 @@ internal fun parseManifestXmlToVersions(manifest: String): List<String> {
     } catch (_: IndexOutOfBoundsException) {
         emptyList()
     }
+}
+
+/**
+ * Parses a SNAPSHOT version-level maven-metadata.xml to extract the timestamp and build number.
+ * Returns the resolved version with `-SNAPSHOT` replaced by `-<timestamp>-<buildNumber>`, or null.
+ *
+ * Example: for version `2.3.20-ij253-105-0.11.0-SNAPSHOT` and metadata containing
+ * `<timestamp>20260316.123456</timestamp><buildNumber>1</buildNumber>`,
+ * returns `2.3.20-ij253-105-0.11.0-20260316.123456-1`.
+ */
+internal fun parseSnapshotMetadata(xml: String, snapshotVersion: String): String? {
+    return try {
+        val doc = Jsoup.parse(xml, "", Parser.xmlParser())
+        val versioning = doc.getElementsByTag("metadata")[0]
+            .getElementsByTag("versioning")[0]
+        val snapshot = versioning.getElementsByTag("snapshot")[0]
+        val timestamp = snapshot.getElementsByTag("timestamp")[0].text()
+        val buildNumber = snapshot.getElementsByTag("buildNumber")[0].text()
+
+        snapshotVersion.replaceLast("-SNAPSHOT", "-$timestamp-$buildNumber")
+    } catch (_: IndexOutOfBoundsException) {
+        null
+    }
+}
+
+private fun String.replaceLast(old: String, new: String): String {
+    val index = lastIndexOf(old)
+    if (index < 0) return this
+    return substring(0, index) + new + substring(index + old.length)
 }
 
 private fun Path.jarLinkName(): Path {
