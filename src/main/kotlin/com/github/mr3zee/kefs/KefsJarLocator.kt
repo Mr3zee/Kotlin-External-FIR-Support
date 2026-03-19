@@ -256,7 +256,8 @@ internal object KefsJarLocator {
                     state = ArtifactState.NotFound(
                         """
                             |No compiler plugin artifact exists matching the requested version and criteria:
-                            |  - Version: ${versioned.requestedVersion}, prefixed with $versionPrefix
+                            |  - Version: ${versioned.requestedVersion}
+                            |  - Kotlin: $kotlinIdeVersion
                             |  - Criteria: ${matchFilter.matching}
                             |  - All artifacts in the bundle must have the same version.
                             |Available versions for Kotlin $kotlinIdeVersion:
