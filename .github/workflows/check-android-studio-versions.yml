@@ -1,0 +1,43 @@
+# Checks that android-studio-kotlin-versions.properties is up to date
+# with current Android Studio releases.
+
+name: Check Android Studio Versions
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 8 * * *' # Every day at 08:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Check AS version mapping
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Sources
+        uses: actions/checkout@v6
+
+      - name: Install xmllint
+        run: sudo apt-get install -y libxml2-utils
+
+      - name: Run update script
+        env:
+          SPACE_TOKEN: ${{ secrets.SPACE_INTELLIJ_TOKEN }}
+        run: |
+          chmod +x scripts/update-android-studio-versions.sh
+          scripts/update-android-studio-versions.sh
+
+      - name: Check for changes
+        run: |
+          if git diff --quiet src/main/resources/android-studio-kotlin-versions.properties; then
+            echo "✅ android-studio-kotlin-versions.properties is up to date"
+          else
+            echo "❌ android-studio-kotlin-versions.properties is outdated"
+            echo ""
+            echo "Diff:"
+            git diff src/main/resources/android-studio-kotlin-versions.properties
+            echo ""
+            echo "Run: SPACE_TOKEN=\$PERSONAL_SPACE_PASSWORD ./scripts/update-android-studio-versions.sh"
+            exit 1
+          fi

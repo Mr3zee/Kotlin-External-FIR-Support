@@ -388,8 +388,16 @@ internal class KefsExceptionReporter(
                 reportFile.createFile()
             }
 
-            val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
-            reportFile.writeText(formatExceptionReport(report, kotlinIdeVersion))
+            val versionService = service<KotlinVersionService>()
+            reportFile.writeText(
+                formatExceptionReport(
+                    report = report,
+                    kotlinIdeVersion = versionService.getKotlinIdePluginVersion(),
+                    ideBuildNumber = versionService.getIdeBuildNumber(),
+                    isAndroidStudio = versionService.isAndroidStudio(),
+                    rawKotlinVersion = versionService.getRawKotlinIdePluginVersion(),
+                )
+            )
         }
 
         reportFile

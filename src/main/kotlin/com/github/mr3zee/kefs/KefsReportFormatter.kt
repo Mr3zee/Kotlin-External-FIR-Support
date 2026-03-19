@@ -6,10 +6,27 @@ import java.time.format.DateTimeFormatter
 
 private val NL = System.lineSeparator()
 
-internal fun formatExceptionReport(report: ExceptionsReport, kotlinIdeVersion: String): String {
+internal fun formatExceptionReport(
+    report: ExceptionsReport,
+    kotlinIdeVersion: String,
+    ideBuildNumber: String,
+    isAndroidStudio: Boolean,
+    rawKotlinVersion: String,
+): String {
+    val androidStudioInfo = if (isAndroidStudio) {
+        """
+Android Studio: yes
+Raw Kotlin version (stub): $rawKotlinVersion
+        """.trimIndent()
+    } else {
+        "Android Studio: no"
+    }
+
     return """
 KEFS Report for ${report.pluginName} (${report.mavenId})
 
+IDE build number: $ideBuildNumber
+$androidStudioInfo
 Kotlin IDE version: $kotlinIdeVersion
 Kotlin version mismatch: ${report.kotlinVersionMismatch ?: "none"}
 Requested version: ${report.requestedVersion}

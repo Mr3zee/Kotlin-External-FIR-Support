@@ -40,17 +40,31 @@ class KefsReportFormatterTest {
         )
     }
 
+    private fun formatReport(
+        report: ExceptionsReport,
+        kotlinIdeVersion: String,
+        ideBuildNumber: String = "252.28238.7.2523.14688667",
+        isAndroidStudio: Boolean = false,
+        rawKotlinVersion: String = kotlinIdeVersion,
+    ): String = formatExceptionReport(
+        report = report,
+        kotlinIdeVersion = kotlinIdeVersion,
+        ideBuildNumber = ideBuildNumber,
+        isAndroidStudio = isAndroidStudio,
+        rawKotlinVersion = rawKotlinVersion,
+    )
+
     @Test
     fun `formatExceptionReport output contains plugin name`() {
         val report = createReport(pluginName = "my-plugin")
-        val output = formatExceptionReport(report, "2.2.0")
+        val output = formatReport(report, "2.2.0")
         assertTrue("Output should contain the plugin name", output.contains("my-plugin"))
     }
 
     @Test
     fun `formatExceptionReport output contains kotlin IDE version`() {
         val report = createReport()
-        val output = formatExceptionReport(report, "2.2.0-ij251-78")
+        val output = formatReport(report, "2.2.0-ij251-78")
         assertTrue("Output should contain the Kotlin IDE version", output.contains("2.2.0-ij251-78"))
     }
 
@@ -59,7 +73,7 @@ class KefsReportFormatterTest {
         val ex1 = RuntimeException("first error")
         val ex2 = IllegalStateException("second error")
         val report = createReport(exceptions = listOf(ex1, ex2))
-        val output = formatExceptionReport(report, "2.2.0")
+        val output = formatReport(report, "2.2.0")
 
         assertTrue("Output should contain first exception message", output.contains("first error"))
         assertTrue("Output should contain second exception message", output.contains("second error"))
@@ -76,7 +90,7 @@ class KefsReportFormatterTest {
     @Test
     fun `formatExceptionReport output contains none when kotlinVersionMismatch is null`() {
         val report = createReport(kotlinVersionMismatch = null)
-        val output = formatExceptionReport(report, "2.2.0")
+        val output = formatReport(report, "2.2.0")
         assertTrue(
             "Output should contain 'none' for null kotlinVersionMismatch",
             output.contains("Kotlin version mismatch: none"),
@@ -90,7 +104,7 @@ class KefsReportFormatterTest {
             jarVersion = "2.1.0-ij251-50",
         )
         val report = createReport(kotlinVersionMismatch = mismatch)
-        val output = formatExceptionReport(report, "2.2.0")
+        val output = formatReport(report, "2.2.0")
         assertTrue(
             "Output should contain the mismatch toString",
             output.contains("2.2.0-ij251-78") && output.contains("2.1.0-ij251-50"),
@@ -99,6 +113,36 @@ class KefsReportFormatterTest {
             "Output should not contain 'none' when mismatch is present",
             output.contains("Kotlin version mismatch: none"),
         )
+    }
+
+    @Test
+    fun `formatExceptionReport output contains IDE build number`() {
+        val report = createReport()
+        val output = formatReport(report, "2.2.0", ideBuildNumber = "252.28238.7.2523.14688667")
+        assertTrue("Output should contain the IDE build number", output.contains("252.28238.7.2523.14688667"))
+    }
+
+    @Test
+    fun `formatExceptionReport output shows Android Studio info when isAndroidStudio is true`() {
+        val report = createReport()
+        val output = formatReport(
+            report,
+            kotlinIdeVersion = "2.2.20",
+            ideBuildNumber = "252.28238.7.2523.14688667",
+            isAndroidStudio = true,
+            rawKotlinVersion = "2.2.255-dev-255",
+        )
+        assertTrue("Output should indicate Android Studio", output.contains("Android Studio: yes"))
+        assertTrue("Output should contain raw stub version", output.contains("2.2.255-dev-255"))
+        assertTrue("Output should contain resolved version", output.contains("Kotlin IDE version: 2.2.20"))
+    }
+
+    @Test
+    fun `formatExceptionReport output shows no Android Studio when not AS`() {
+        val report = createReport()
+        val output = formatReport(report, "2.2.0", isAndroidStudio = false)
+        assertTrue("Output should indicate not Android Studio", output.contains("Android Studio: no"))
+        assertFalse("Output should not contain stub version line", output.contains("Raw Kotlin version"))
     }
 
     @Test
