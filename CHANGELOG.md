@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Android Studio Kotlin version support: detect Android Studio stub Kotlin versions (e.g. `2.2.255-dev-255`) and resolve them to actual Kotlin versions using a bundled mapping from IntelliJ platform build numbers
+- Android Studio `runIde` build support via `runAndroidStudio` Gradle task
+- GitHub workflow to check Android Studio version mapping freshness daily
+
+### Fixed
+
+- Fix "not found" message in jar locator
+
 ## [0.3.3] - 2026-03-17
 
 ### Fixed
