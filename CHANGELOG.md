@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-03-19
+
 ### Added
 
 - Android Studio Kotlin version support: detect Android Studio stub Kotlin versions (e.g. `2.2.255-dev-255`) and resolve them to actual Kotlin versions using a bundled mapping from IntelliJ platform build numbers
@@ -191,7 +193,8 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.0...v0.3.1
