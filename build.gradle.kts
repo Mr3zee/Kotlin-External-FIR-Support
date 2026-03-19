@@ -258,5 +258,17 @@ intellijPlatformTesting {
                 robotServerPlugin()
             }
         }
+
+        register("runAndroidStudio") {
+            type = IntelliJPlatformType.AndroidStudio
+            version = providers.gradleProperty("androidStudioVersion")
+                .getOrElse(providers.gradleProperty("androidStudio.defaultVersion").getOrElse("2025.3.2"))
+
+            task {
+                jvmArgumentProviders += CommandLineArgumentProvider {
+                    listOf("-Didea.kotlin.plugin.use.k2=true")
+                }
+            }
+        }
     }
 }
