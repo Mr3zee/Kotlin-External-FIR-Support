@@ -111,6 +111,13 @@ echo "Filtered builds (>= $MINIMUM_VERSION):"
 echo "$filtered_builds"
 echo ""
 
+# Snapshot existing entries so we can preserve versions no longer in the manifests.
+SNAPSHOT_FILE=""
+if [[ -f "$OUTPUT_FILE" ]]; then
+    SNAPSHOT_FILE=$(mktemp)
+    cp "$OUTPUT_FILE" "$SNAPSHOT_FILE"
+fi
+
 # Write header
 cat > "$OUTPUT_FILE" << 'HEADER'
 # Maps IntelliJ platform build number to real Kotlin compiler version
@@ -144,6 +151,28 @@ while IFS= read -r build; do
         echo "  $build -> NOT FOUND (tag may not exist)"
     fi
 done <<< "$filtered_builds"
+
+# Preserve any entries from the snapshot that are not present in the freshly
+# generated output (old versions no longer advertised in the manifests).
+if [[ -n "$SNAPSHOT_FILE" ]]; then
+    preserved=0
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        key="${line%%=*}"
+        if ! grep -q "^${key}=" "$OUTPUT_FILE"; then
+            echo "$line" >> "$OUTPUT_FILE"
+            preserved=$((preserved + 1))
+            echo "  Preserved old entry: $line"
+        fi
+    done < "$SNAPSHOT_FILE"
+    echo "Preserved $preserved old entries not present in current manifests."
+    rm -f "$SNAPSHOT_FILE"
+
+    # Keep comments on top, sort key=value lines by platform build.
+    awk '/^#/ || /^$/ {print; next} {print | "sort -t. -k1,1n -k2,2n -k3,3n"}' \
+        "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp"
+    mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE"
+fi
 
 echo ""
 echo "Updated: $OUTPUT_FILE"
