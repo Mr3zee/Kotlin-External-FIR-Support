@@ -6,6 +6,12 @@
 
 ### Added
 
+- Android Studio version 261.23567.138 support
+
+## [0.3.5] - 2026-04-19
+
+### Added
+
 - Android Studio version 261.22158.277 support
 
 ## [0.3.4] - 2026-03-19
