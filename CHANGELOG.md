@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- IntelliJ 262 support
+
 ## [0.3.6] - 2026-05-07
 
 ### Added
