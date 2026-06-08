@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-06-08
+
 ### Added
 
 - Android Studio version 261.24374.151 support
@@ -215,18 +217,19 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.7...HEAD
-[0.3.7]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.6...v0.3.7
-[0.3.6]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.5...v0.3.6
-[0.3.5]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.4...v0.3.5
-[0.3.4]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.3...v0.3.4
-[0.3.3]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.2...v0.3.3
-[0.3.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.1...v0.3.2
-[0.3.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.1.2...v0.2.0
-[0.1.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.0.2...v0.1.0
-[0.0.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/commits/v0.0.1
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.8...HEAD
+[0.3.8]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.7...0.3.8
+[0.3.7]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.6...0.3.7
+[0.3.6]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.5...0.3.6
+[0.3.5]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.4...0.3.5
+[0.3.4]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.3...0.3.4
+[0.3.3]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.2...0.3.3
+[0.3.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.1...0.3.2
+[0.3.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.0...0.3.1
+[0.3.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.2.0...0.3.0
+[0.2.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.1.2...0.2.0
+[0.1.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.1.1...0.1.2
+[0.1.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.1.0...0.1.1
+[0.1.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.0.2...0.1.0
+[0.0.2]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.0.1...0.0.2
+[0.0.1]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/commits/0.0.1
