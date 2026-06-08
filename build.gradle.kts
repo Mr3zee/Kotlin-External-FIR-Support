@@ -183,6 +183,12 @@ intellijPlatform {
     }
 
     pluginVerification {
+        failureLevel = VerifyPluginTask.FailureLevel.ALL - setOf(
+            VerifyPluginTask.FailureLevel.INTERNAL_API_USAGES,
+            VerifyPluginTask.FailureLevel.EXPERIMENTAL_API_USAGES,
+            VerifyPluginTask.FailureLevel.DEPRECATED_API_USAGES,
+        )
+
         ides {
             select {
                 types = listOf(IntelliJPlatformType.IntellijIdea)
