@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-05-08
+
 ### Added
 
 - IntelliJ 262 support
@@ -209,7 +211,8 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/v0.3.3...v0.3.4
