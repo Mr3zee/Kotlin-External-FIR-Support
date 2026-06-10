@@ -165,14 +165,14 @@ class KefsFileWatcherTest {
 
     @Test
     fun testCacheDirSelfUpdateSuppression(): Unit = runBlocking {
-        watcher.markSelfUpdateStart()
+        val session = watcher.markSelfUpdateStart()
         try {
             createFile(cacheDir.resolve("self-update.jar"), "content")
 
             // Process events for a while - should NOT trigger callback
             processEventsFor(2000)
         } finally {
-            watcher.markSelfUpdateEnd()
+            session.end()
         }
 
         assertEquals("Self-update should NOT trigger cache dir external change", 0, cacheDirChangeCount.get())
@@ -182,10 +182,10 @@ class KefsFileWatcherTest {
     @Test
     fun testCacheDirSelfUpdateThenExternalChange(): Unit = runBlocking {
         // Self-update: should be suppressed
-        watcher.markSelfUpdateStart()
+        val session = watcher.markSelfUpdateStart()
         createFile(cacheDir.resolve("self-update.jar"), "self-content")
         processEventsFor(1500)
-        watcher.markSelfUpdateEnd()
+        session.end()
 
         assertEquals("Self-update should be suppressed", 0, cacheDirChangeCount.get())
 
@@ -216,12 +216,12 @@ class KefsFileWatcherTest {
         awaitCondition { cacheDirChangeCount.get() > 0 }
         cacheDirChangeCount.set(0)
 
-        watcher.markSelfUpdateStart()
+        val session = watcher.markSelfUpdateStart()
         try {
             deleteFile(file)
             processEventsFor(2000)
         } finally {
-            watcher.markSelfUpdateEnd()
+            session.end()
         }
 
         assertEquals("DELETE during self-update should be suppressed", 0, cacheDirChangeCount.get())
@@ -234,7 +234,7 @@ class KefsFileWatcherTest {
      */
     @Test
     fun testCacheDirSelfUpdateSuppressesMultipleOperations(): Unit = runBlocking {
-        watcher.markSelfUpdateStart()
+        val session = watcher.markSelfUpdateStart()
         try {
             // Simulate locator workflow: create .downloading, then delete it, then create new one
             val downloading = cacheDir.resolve("artifact.jar.downloading")
@@ -251,26 +251,26 @@ class KefsFileWatcherTest {
             }
             processEventsFor(1000)
         } finally {
-            watcher.markSelfUpdateEnd()
+            session.end()
         }
 
         assertEquals("All operations during self-update should be suppressed", 0, cacheDirChangeCount.get())
     }
 
     /**
-     * Tests that the grace period after markSelfUpdateEnd() suppresses late-arriving events.
+     * Tests that the grace period after SelfUpdateSession.end() suppresses late-arriving events.
      * OS file watchers (especially on Windows) can deliver events asynchronously after the
      * file operations that caused them.
      */
     @Test
     fun testGracePeriodSuppressesDelayedEvents(): Unit = runBlocking {
-        watcher.markSelfUpdateStart()
+        val session = watcher.markSelfUpdateStart()
         createFile(cacheDir.resolve("artifact.jar"), "content")
         processEventsFor(500)
-        watcher.markSelfUpdateEnd()
+        session.end()
 
         // Immediately process events — these are "delayed" events from the self-update
-        // that arrive after markSelfUpdateEnd() but within the grace period
+        // that arrive after end() but within the grace period
         processEventsFor(1000)
 
         assertEquals("Events during grace period should be suppressed", 0, cacheDirChangeCount.get())
@@ -288,10 +288,10 @@ class KefsFileWatcherTest {
         cacheDirChangeCount.set(0)
 
         // Do a self-update cycle
-        watcher.markSelfUpdateStart()
+        val session = watcher.markSelfUpdateStart()
         createFile(cacheDir.resolve("self.jar"), "self")
         processEventsFor(500)
-        watcher.markSelfUpdateEnd()
+        session.end()
 
         // Wait for grace period to expire
         delay(KefsFileWatcher.SELF_UPDATE_GRACE_PERIOD_MS + 500)
@@ -303,6 +303,40 @@ class KefsFileWatcherTest {
         awaitCondition { cacheDirChangeCount.get() > 0 }
 
         assertTrue("DELETE after grace period should trigger callback", cacheDirChangeCount.get() > 0)
+    }
+
+    /**
+     * Regression test: ending one self-update session twice must not affect another
+     * session still in flight. A cancelled actualize job used to decrement the shared
+     * counter twice (finally + cancellation handler), taking it from 2 to 0 while a
+     * concurrent job was still downloading; the watcher then treated the plugin's own
+     * downloads as external changes, cancelling jobs in an infinite loop.
+     */
+    @Test
+    fun testDoubleSessionEndDoesNotBreakConcurrentSuppression(): Unit = runBlocking {
+        val cancelled = watcher.markSelfUpdateStart()
+        val inFlight = watcher.markSelfUpdateStart()
+
+        // Simulate the historical double-decrement of a cancelled job: end() is idempotent
+        cancelled.end()
+        cancelled.end()
+
+        // Wait out the grace period so suppression relies on the counter alone
+        delay(KefsFileWatcher.SELF_UPDATE_GRACE_PERIOD_MS + 500)
+
+        try {
+            // The in-flight session must still suppress the watcher
+            createFile(cacheDir.resolve("self-update.jar"), "content")
+            processEventsFor(2000)
+        } finally {
+            inFlight.end()
+        }
+
+        assertEquals(
+            "Self-update concurrent with a double-ended session should still be suppressed",
+            0,
+            cacheDirChangeCount.get(),
+        )
     }
 
     @Test

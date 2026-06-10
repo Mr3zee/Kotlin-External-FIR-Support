@@ -13,6 +13,7 @@ import java.nio.file.WatchService
 import java.nio.file.Watchable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.PathWalkOption
@@ -61,13 +62,27 @@ internal class KefsFileWatcher(
         }
     }
 
-    fun markSelfUpdateStart() {
-        cacheDirSelfUpdates.incrementAndGet()
+    /**
+     * A single self-update of the cache dir. [end] is idempotent, so each started
+     * self-update decrements the counter exactly once no matter how many code paths
+     * (finally blocks, cancellation handlers) call it. An unbalanced extra end() call
+     * used to drive the counter to zero while another self-update was still in flight,
+     * making the watcher treat the plugin's own downloads as external changes.
+     */
+    internal inner class SelfUpdateSession {
+        private val ended = AtomicBoolean(false)
+
+        fun end() {
+            if (ended.compareAndSet(false, true)) {
+                cacheDirSelfUpdates.decrementAndGet()
+                selfUpdateEndTimestamp.set(System.currentTimeMillis())
+            }
+        }
     }
 
-    fun markSelfUpdateEnd() {
-        cacheDirSelfUpdates.decrementAndGet()
-        selfUpdateEndTimestamp.set(System.currentTimeMillis())
+    fun markSelfUpdateStart(): SelfUpdateSession {
+        cacheDirSelfUpdates.incrementAndGet()
+        return SelfUpdateSession()
     }
 
     /**

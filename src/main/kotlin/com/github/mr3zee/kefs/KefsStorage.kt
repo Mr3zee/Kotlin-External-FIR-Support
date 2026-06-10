@@ -571,10 +571,9 @@ internal class KefsStorage(
                     k.mavenId to (v as ArtifactState.Cached).jar
                 }
 
-            fileWatcher.markSelfUpdateStart()
+            val selfUpdate = fileWatcher.markSelfUpdateStart()
             val bundleResult = runCatchingExceptCancellation(
                 onCancellation = {
-                    fileWatcher.markSelfUpdateEnd()
                     statusPublisher.updatePlugin(
                         pluginName = descriptor.name,
                         status = ArtifactStatus.FailedToFetch("Job was cancelled"),
@@ -589,7 +588,7 @@ internal class KefsStorage(
                         known = known,
                     )
                 } finally {
-                    fileWatcher.markSelfUpdateEnd()
+                    selfUpdate.end()
                 }
             }
 
