@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Issue with a self-update detection that entered an infinite loop of clearing the state.
+
 ## [0.3.8] - 2026-06-08
 
 ### Added
