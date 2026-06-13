@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Android Studio version 261.25134.95 support
+
+## [0.3.9] - 2026-06-10
+
 ### Fixed
 
 - Issue with a self-update detection that entered an infinite loop of clearing the state.
@@ -221,7 +227,8 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.8...HEAD
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.9...HEAD
+[0.3.9]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.8...0.3.9
 [0.3.8]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.7...0.3.8
 [0.3.7]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.6...0.3.7
 [0.3.6]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.5...0.3.6
