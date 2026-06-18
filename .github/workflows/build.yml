@@ -24,7 +24,7 @@ jobs:
           large-packages: false
 
       - name: Fetch Sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -65,7 +65,7 @@ jobs:
           large-packages: false
 
       - name: Fetch Sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -89,7 +89,7 @@ jobs:
           path: ${{ github.workspace }}/build/reports/tests
 
       - name: Upload Code Coverage Report
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ${{ github.workspace }}/build/reports/kover/report.xml
           token: ${{ secrets.CODECOV_TOKEN }}
