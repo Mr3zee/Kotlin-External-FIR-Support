@@ -1,5 +1,8 @@
-# Checks that android-studio-kotlin-versions.properties is up to date
-# with current Android Studio releases.
+# Checks that android-studio-kotlin-versions.properties is up to date with current
+# Android Studio releases. When it is outdated, the workflow turns the update into a
+# gated release: it waits for a GitHub deployment approval (release-approval
+# environment) and then commits the file, bumps the patch version, updates the
+# changelog, and pushes release/latest to start the pre-release (draft) pipeline.
 
 name: Check Android Studio Versions
 
@@ -14,6 +17,11 @@ jobs:
   check:
     name: Check AS version mapping
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      versions: ${{ steps.diff.outputs.versions }}
     steps:
       - name: Fetch Sources
         uses: actions/checkout@v6
@@ -28,16 +36,170 @@ jobs:
           chmod +x scripts/update-android-studio-versions.sh
           scripts/update-android-studio-versions.sh
 
-      - name: Check for changes
+      - name: Detect changes
+        id: diff
         run: |
-          if git diff --quiet src/main/resources/android-studio-kotlin-versions.properties; then
-            echo "✅ android-studio-kotlin-versions.properties is up to date"
-          else
-            echo "❌ android-studio-kotlin-versions.properties is outdated"
-            echo ""
-            echo "Diff:"
-            git diff src/main/resources/android-studio-kotlin-versions.properties
-            echo ""
-            echo "Run: SPACE_TOKEN=\$PERSONAL_SPACE_PASSWORD ./scripts/update-android-studio-versions.sh"
-            exit 1
+          set -euo pipefail
+          FILE=src/main/resources/android-studio-kotlin-versions.properties
+
+          if git diff --quiet "$FILE"; then
+            echo "✅ $FILE is up to date"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          echo "❌ $FILE is outdated — preparing a release"
+          echo ""
+          echo "Diff:"
+          git diff "$FILE"
+
+          # Robustly compute the newly added platform build numbers (keys present now
+          # but absent in the committed file), independent of line reordering.
+          git show "HEAD:$FILE" 2>/dev/null | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | sort -u > /tmp/old_keys || true
+          grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' "$FILE" | sort -u > /tmp/new_keys
+          VERSIONS=$(comm -13 /tmp/old_keys /tmp/new_keys | paste -sd ' ' -)
+
+          echo ""
+          echo "Newly added versions: ${VERSIONS:-<none>}"
+          {
+            echo "changed=true"
+            echo "versions=$VERSIONS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload updated properties
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-studio-kotlin-versions
+          path: src/main/resources/android-studio-kotlin-versions.properties
+          retention-days: 1
+
+  release:
+    name: Approve & release
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    # Deployment approval gate. Configure required reviewers on the
+    # "release-approval" environment so this job pauses before any step runs.
+    environment:
+      name: release-approval
+    steps:
+      - name: Fetch Sources
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download updated properties
+        uses: actions/download-artifact@v7
+        with:
+          name: android-studio-kotlin-versions
+          path: artifact
+
+      - name: Merge pending changelog PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The previous release's changelog update must land on main before we patch
+          # the changelog again, otherwise already-released notes leak into this release.
+          PR=$(gh pr list --label "release changelog" --state open \
+                --json number --jq 'map(.number) | max // empty')
+
+          if [[ -n "$PR" ]]; then
+            echo "Merging pending 'release changelog' PR #$PR"
+            gh pr merge "$PR" --squash --delete-branch
+            git fetch origin main
+            git pull --ff-only origin main
+          else
+            echo "No pending 'release changelog' PR — continuing"
+          fi
+
+      - name: Apply update, bump version & patch changelog
+        id: prep
+        env:
+          VERSIONS: ${{ needs.check.outputs.versions }}
+        run: |
+          set -euo pipefail
+          FILE=src/main/resources/android-studio-kotlin-versions.properties
+          cp artifact/android-studio-kotlin-versions.properties "$FILE"
+
+          # Build the changelog bullets for the [Unreleased] section.
+          : > /tmp/bullets.txt
+          if [[ -n "$VERSIONS" ]]; then
+            for v in $VERSIONS; do
+              echo "- Android Studio version $v support" >> /tmp/bullets.txt
+            done
+          else
+            echo "- Updated Android Studio version mapping" >> /tmp/bullets.txt
+          fi
+
+          # Insert the bullets under [Unreleased] -> "### Added" (creating the section
+          # if it does not exist yet). The existing pipeline runs patchChangelog at
+          # publish time, so we only touch [Unreleased] here.
+          awk -v bf=/tmp/bullets.txt '
+            function emit(   l){ while((getline l < bf)>0) print l; close(bf) }
+            BEGIN { inu=0; done=0 }
+            /^## \[Unreleased\]/ { print; inu=1; next }
+            inu==1 && /^### Added/ {
+              print
+              if ((getline l) > 0) {
+                if (l == "") { print ""; emit() }
+                else { print ""; emit(); print l }
+              }
+              done=1; next
+            }
+            inu==1 && /^## \[/ {
+              if (!done) { print "### Added"; print ""; emit(); print "" }
+              inu=0; done=1; print; next
+            }
+            { print }
+          ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+
+          # Bump pluginVersion one patch up (e.g. 0.3.10 -> 0.3.11).
+          CUR=$(sed -n 's/^pluginVersion *= *//p' gradle.properties | tr -d '[:space:]')
+          MAJOR=${CUR%%.*}; REST=${CUR#*.}; MINOR=${REST%%.*}; PATCH=${REST#*.}
+          PATCH_NUM=$(printf '%s' "$PATCH" | grep -oE '^[0-9]+')
+          NEW="$MAJOR.$MINOR.$((PATCH_NUM + 1))"
+          sed -i "s/^pluginVersion = .*/pluginVersion = $NEW/" gradle.properties
+
+          echo "Bumped pluginVersion: $CUR -> $NEW"
+          echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Commit, push & trigger pre-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSIONS: ${{ needs.check.outputs.versions }}
+          NEW_VERSION: ${{ steps.prep.outputs.new_version }}
+        run: |
+          set -euo pipefail
+          FILE=src/main/resources/android-studio-kotlin-versions.properties
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ -n "$VERSIONS" ]]; then
+            FILE_MSG="Support $VERSIONS AS version"
+          else
+            FILE_MSG="Update Android Studio version mapping"
+          fi
+
+          git add "$FILE"
+          git diff --cached --quiet || git commit -m "$FILE_MSG"
+
+          git add CHANGELOG.md gradle.properties
+          git diff --cached --quiet || git commit -m "CHANGELOG.md + $NEW_VERSION"
+
+          git push origin HEAD:main
+          git push origin HEAD:release/latest
+
+          # The push above is made with GITHUB_TOKEN, which does NOT trigger the
+          # `on: push` pre-release workflow. Start it explicitly via workflow_dispatch.
+          gh workflow run pre-release.yml --ref release/latest

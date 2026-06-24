@@ -5,6 +5,9 @@ name: Pre-release
 on:
   push:
     branches: [ 'release/latest' ]
+  # Allows check-android-studio-versions.yml to start this pipeline after pushing
+  # release/latest with GITHUB_TOKEN (token pushes do not trigger `on: push`).
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
