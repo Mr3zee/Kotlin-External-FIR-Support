@@ -24,7 +24,7 @@ jobs:
       versions: ${{ steps.diff.outputs.versions }}
     steps:
       - name: Fetch Sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install xmllint
         run: |
@@ -91,13 +91,13 @@ jobs:
       name: release-approval
     steps:
       - name: Fetch Sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
 
       - name: Download updated properties
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: android-studio-kotlin-versions
           path: artifact
