@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-06-30
+
 ### Fixed
 
 - File watcher no longer reports an unhandled exception when the OS runs out of inotify instances / open files (Linux); watching is disabled gracefully instead. State clears (Refresh/Clear Caches, external changes) now fully reset the watch service, letting it recover after a transient OS failure. Also fixed a race that could leak a watch service (inotify instance) during concurrent registration.
@@ -233,7 +235,8 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.10...HEAD
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.11...HEAD
+[0.3.11]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.10...0.3.11
 [0.3.10]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.9...0.3.10
 [0.3.9]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.8...0.3.9
 [0.3.8]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.7...0.3.8
