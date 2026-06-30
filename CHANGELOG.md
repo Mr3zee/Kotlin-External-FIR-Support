@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- File watcher no longer reports an unhandled exception when the OS runs out of inotify instances / open files (Linux); watching is disabled gracefully instead. State clears (Refresh/Clear Caches, external changes) now fully reset the watch service, letting it recover after a transient OS failure. Also fixed a race that could leak a watch service (inotify instance) during concurrent registration.
+
 ## [0.3.10] - 2026-06-13
 
 ### Added

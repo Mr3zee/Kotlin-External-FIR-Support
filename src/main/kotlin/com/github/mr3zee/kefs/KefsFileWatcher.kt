@@ -2,8 +2,12 @@ package com.github.mr3zee.kefs
 
 import com.intellij.openapi.diagnostic.thisLogger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.Closeable
+import java.nio.file.ClosedWatchServiceException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardWatchEventKinds
@@ -30,7 +34,11 @@ internal interface FileWatcherCallback {
 internal class KefsFileWatcher(
     private val callback: FileWatcherCallback,
 ) : Closeable {
-    private lateinit var watchService: WatchService
+    @Volatile
+    private var watchService: WatchService? = null
+    @Volatile
+    private var watchServiceUnavailable = false
+    private val registrationLock = Mutex()
 
     private val watchedDirToRoot = ConcurrentHashMap<Path, Path>()
     private val watchedDirToKey = ConcurrentHashMap<Path, WatchKey>()
@@ -43,23 +51,40 @@ internal class KefsFileWatcher(
 
     suspend fun registerLocalRepo(path: Path) {
         val normalized = path.toAbsolutePath().normalize()
-        localRepoRoots.add(normalized)
-        ensureWatchServiceInitialized(normalized)
-        registerDirectoryTreeWatch(normalized)
+        registrationLock.withLock {
+            if (ensureWatchServiceInitialized(normalized) == null) return@withLock
+            // Mark as a local repo root only once we know we will actually watch it, so a
+            // concurrent reset() (which clears localRepoRoots) cannot leave a watched root
+            // misclassified as a cache dir in processOneEvent.
+            localRepoRoots.add(normalized)
+            registerDirectoryTreeWatch(normalized)
+        }
     }
 
     suspend fun registerCacheDir(path: Path) {
         val normalized = path.toAbsolutePath().normalize()
-        ensureWatchServiceInitialized(normalized)
-        registerDirectoryTreeWatch(normalized)
+        registrationLock.withLock {
+            if (ensureWatchServiceInitialized(normalized) == null) return@withLock
+            registerDirectoryTreeWatch(normalized)
+        }
     }
 
-    private suspend fun ensureWatchServiceInitialized(path: Path) {
-        if (!::watchService.isInitialized) {
-            watchService = withContext(Dispatchers.IO) {
+    private suspend fun ensureWatchServiceInitialized(path: Path): WatchService? {
+        watchService?.let { return it }
+        if (watchServiceUnavailable) return null
+
+        val created = runCatchingExceptCancellation {
+            withContext(Dispatchers.IO) {
                 path.fileSystem.newWatchService()
             }
+        }.getOrElse { e ->
+            watchServiceUnavailable = true
+            logger.warn("Failed to initialize file watch service; hot-reload disabled until next state refresh", e)
+            null
         }
+
+        watchService = created
+        return created
     }
 
     /**
@@ -106,8 +131,25 @@ internal class KefsFileWatcher(
      * Returns true if an event was processed, false if poll timed out.
      */
     suspend fun processOneEvent(): Boolean {
-        val key = withContext(Dispatchers.IO) {
-            watchService.poll(1000, TimeUnit.MILLISECONDS)
+        val service = watchService
+        if (service == null) {
+            // No watch service available (failed to initialize or not yet initialized).
+            // Sleep to avoid busy-spinning the caller's `while (true) { processOneEvent() }` loop.
+            delay(1000)
+            return false
+        }
+
+        val key = try {
+            withContext(Dispatchers.IO) {
+                service.poll(1000, TimeUnit.MILLISECONDS)
+            }
+        } catch (_: ClosedWatchServiceException) {
+            // The service was closed concurrently (e.g. reset() during a state clear).
+            // Sleep before returning so the caller's `while (true)` loop does not busy-spin
+            // until reset() finishes nulling the field; the next iteration then picks up the
+            // freshly created service (or null -> delay again).
+            delay(1000)
+            return false
         } ?: return false
 
         // WatchKey.watchable() may return a different Path type (e.g. UnixPath)
@@ -195,12 +237,25 @@ internal class KefsFileWatcher(
         registeredRoots.clear()
     }
 
+    suspend fun reset() {
+        registrationLock.withLock {
+            cancelAllWatchKeys()
+            localRepoRoots.clear()
+            watchService?.let { service ->
+                runCatchingExceptCancellation { service.close() }
+            }
+            watchService = null
+            watchServiceUnavailable = false
+        }
+    }
+
     override fun close() {
         cancelAllWatchKeys()
         localRepoRoots.clear()
-        if (::watchService.isInitialized) {
-            runCatchingExceptCancellation { watchService.close() }
+        watchService?.let { service ->
+            runCatchingExceptCancellation { service.close() }
         }
+        watchService = null
     }
 
     private suspend fun registerDirectoryTreeWatch(root: Path) {
@@ -260,8 +315,9 @@ internal class KefsFileWatcher(
 
     @Suppress("SameParameterValue")
     private fun Watchable.registerSafe(vararg events: WatchEvent.Kind<*>): WatchKey? {
+        val service = watchService ?: return null
         return try {
-            register(watchService, *events)
+            register(service, *events)
         } catch (e: Exception) {
             logger.warn("Failed to register watch key for $this", e)
             null

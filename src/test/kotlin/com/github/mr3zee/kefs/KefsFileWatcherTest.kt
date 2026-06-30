@@ -339,6 +339,25 @@ class KefsFileWatcherTest {
         )
     }
 
+    /**
+     * Regression test: reset() tears down the watch service entirely, and re-registering
+     * afterwards must rebuild it and resume detecting changes. This mirrors what
+     * KefsStorage.internalClearStateNoInvalidate does (reset() then reregisterWatchers()).
+     */
+    @Test
+    fun testResetThenReregisterResumesDetection(): Unit = runBlocking {
+        watcher.reset()
+
+        watcher.registerCacheDir(cacheDir)
+        watcher.registerLocalRepo(localRepoDir)
+
+        createFile(cacheDir.resolve("after-reset.jar"), "content")
+
+        awaitCondition { cacheDirChangeCount.get() > 0 }
+
+        assertTrue("Cache dir changes should be detected after reset + re-register", cacheDirChangeCount.get() > 0)
+    }
+
     @Test
     fun testNoSpuriousEvents(): Unit = runBlocking {
         // Just wait without making changes

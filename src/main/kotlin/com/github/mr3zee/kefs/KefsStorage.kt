@@ -280,7 +280,7 @@ internal class KefsStorage(
             pluginsCache.clear()
             lifecycleCache.clear()
 
-            fileWatcher.cancelAllWatchKeys()
+            fileWatcher.reset()
 
             and()
         } finally {
@@ -370,8 +370,12 @@ internal class KefsStorage(
                         throw e
                     }
                 }
+            } catch (e: CancellationException) {
+                // Scope cancelled (project closing); propagate so the coroutine completes as
+                // cancelled rather than completed — required for structured concurrency.
+                throw e
             } catch (_: Exception) {
-                // ignore
+                // File watching is best-effort; a dead loop must not crash the storage service.
             }
         }
 
