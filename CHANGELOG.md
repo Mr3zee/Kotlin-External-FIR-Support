@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-07-10
+
 ### Added
 
 - Android Studio version 261.26222.65 support
@@ -239,7 +241,8 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.11...HEAD
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.12...HEAD
+[0.3.12]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.11...0.3.12
 [0.3.11]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.10...0.3.11
 [0.3.10]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.9...0.3.10
 [0.3.9]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.8...0.3.9
