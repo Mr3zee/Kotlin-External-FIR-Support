@@ -524,6 +524,38 @@ class KefsFileWatcherTest {
         assertTrue("Recovery must not trigger local repo changes", localRepoChanges.isEmpty())
     }
 
+    @OptIn(ExperimentalPathApi::class)
+    @Test
+    fun testDevKitDirInLocalRepoStaysPartOfTheRepo(): Unit = runBlocking {
+        val devKitDir = localRepoDir.resolve("org/example/1.0").also { it.createDirectories() }
+        val jar = devKitDir.resolve("plugin.jar")
+        createFile(jar, "original")
+
+        watcher.reset()
+        watcher.registerCacheDir(cacheDir)
+        watcher.registerLocalRepo(localRepoDir)
+        watcher.registerDevKitDir(devKitDir)
+
+        withContext(Dispatchers.IO) {
+            devKitDir.deleteRecursively()
+        }
+
+        processEventsFor(12000)
+
+        createFile(jar, "rebuilt")
+        awaitCondition(timeoutMs = 30000) { devKitDirChanges.isNotEmpty() }
+
+        processEventsFor(3000)
+        devKitDirChanges.clear()
+        localRepoChanges.clear()
+
+        modifyFile(jar, "modified")
+        awaitCondition(timeoutMs = 30000) { localRepoChanges.isNotEmpty() }
+
+        assertEquals(localRepoDir.toAbsolutePath().normalize(), localRepoChanges.first())
+        assertEquals("A dev kit dir in a local repo must not be treated as a cache dir", 0, cacheDirChangeCount.get())
+    }
+
     // --- Helpers ---
 
     private suspend fun createFile(path: Path, content: String) {

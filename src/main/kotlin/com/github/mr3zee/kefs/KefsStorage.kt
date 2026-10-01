@@ -273,6 +273,7 @@ internal class KefsStorage(
 
         private const val DEVKIT_STABILITY_DELAY_MS = 300L
         private const val DEVKIT_STABILITY_ATTEMPTS = 20
+        private const val DEVKIT_COPY_ATTEMPTS = 3
     }
 
     private val invalidationDebounceMs: Long
@@ -1092,17 +1093,41 @@ internal class KefsStorage(
             ?.takeIf { it.isNewerIde }
             ?.let { KotlinVersionMismatch(ideVersion = it.ideKotlinVersion, jarVersion = it.pluginKotlinVersion) }
 
+        // a cached jar that was deleted is restored under the same name, the IDE has to be told to ask for it again
+        val isOldJarMissing = (oldState as? ArtifactState.Cached)?.jar?.path?.exists() == false
+
         val selfUpdate = fileWatcher.markSelfUpdateStart()
-        val jarResult = runCatchingExceptCancellation {
-            try {
+        val jarResult = try {
+            var result = runCatchingExceptCancellation {
                 copyDevKitJar(source, pluginName, artifact, requestedVersion, kotlinVersionMismatch)
-            } finally {
-                selfUpdate.end()
             }
+
+            // the failure may be transient, e.g. the jar is locked or is replaced right now
+            var attempt = 1
+            while (result.isFailure && attempt < DEVKIT_COPY_ATTEMPTS) {
+                logger.debug("Failed to copy the dev kit jar $source, attempt $attempt: ${result.exceptionOrNull()}")
+                delay(DEVKIT_STABILITY_DELAY_MS)
+                attempt++
+
+                result = runCatchingExceptCancellation {
+                    copyDevKitJar(source, pluginName, artifact, requestedVersion, kotlinVersionMismatch)
+                }
+            }
+
+            result
+        } finally {
+            selfUpdate.end()
         }
 
         val jar = jarResult.getOrElse { e ->
             logger.warn("Failed to load the dev kit jar $source", e)
+
+            if (oldState is ArtifactState.Cached && !isOldJarMissing && artifactsMap[key] === oldState) {
+                // what is already loaded is kept, the jar is loaded again once it changes
+                devKitSources[source] = loaded
+                publishDevKitStatus(loaded, oldState, isNew = false)
+                return false
+            }
 
             val failed = ArtifactState.FailedToFetch("Failed to copy $source: ${e::class}: ${e.message}")
             artifactsMap[key] = failed
@@ -1113,7 +1138,7 @@ internal class KefsStorage(
             return oldState is ArtifactState.Cached
         }
 
-        val isNew = (oldState as? ArtifactState.Cached)?.jar?.let {
+        val isNew = isOldJarMissing || (oldState as? ArtifactState.Cached)?.jar?.let {
             it.checksum != jar.checksum || it.path != jar.path
         } ?: true
 
@@ -1165,18 +1190,25 @@ internal class KefsStorage(
             ?: error("Failed to find cache directory for $pluginName $requestedVersion")
 
         val checksum = md5(source).asChecksum()
-        val jarPath = destination.resolve(KefsDevKit.cachedJarName(artifact, checksum))
+        val sourceId = KefsDevKit.sourceId(source)
+        val jarPath = destination.resolve(KefsDevKit.cachedJarName(artifact, sourceId, checksum))
 
         if (!jarPath.exists() || md5(jarPath).asChecksum() != checksum) {
-            val temp = jarPath.resolveSibling("${jarPath.name}.tmp")
-            Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING)
-            Files.move(temp, jarPath, StandardCopyOption.REPLACE_EXISTING)
+            // the name is unique: another project or IDE may be copying the same jar right now
+            val temp = Files.createTempFile(destination, "${jarPath.name}.", ".tmp")
+            try {
+                Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING)
+                Files.move(temp, jarPath, StandardCopyOption.REPLACE_EXISTING)
+            } finally {
+                runCatching { Files.deleteIfExists(temp) }
+            }
         }
 
-        // previous versions of the jar, the ones still loaded by the IDE may fail to be deleted
+        // Previous versions of the jar, the ones still loaded by the IDE may fail to be deleted.
+        // Only the jars of this source are deleted, the others belong to other projects.
         runCatching {
             destination.listDirectoryEntries()
-                .filter { it != jarPath && KefsDevKit.isCachedJarOf(artifact, it.name) }
+                .filter { it != jarPath && KefsDevKit.isCachedJarOf(artifact, sourceId, it.name) }
                 .forEach { stale -> runCatching { Files.deleteIfExists(stale) } }
         }
 

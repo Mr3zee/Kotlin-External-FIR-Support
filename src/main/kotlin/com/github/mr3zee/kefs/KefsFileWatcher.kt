@@ -332,16 +332,20 @@ internal class KefsFileWatcher(
         registerSubdirectoriesWatch(root, root)
     }
 
-    @OptIn(ExperimentalPathApi::class)
     private suspend fun registerSubdirectoriesWatch(dir: Path, root: Path) {
         runCatchingExceptCancellation {
             withContext(Dispatchers.IO) {
-                dir.walk(PathWalkOption.INCLUDE_DIRECTORIES).filter {
-                    it.isDirectory()
-                }.forEach { subdir ->
-                    registerDirectoryWatch(subdir, root)
-                }
+                registerSubtreeWatch(dir, root)
             }
+        }
+    }
+
+    @OptIn(ExperimentalPathApi::class)
+    private fun registerSubtreeWatch(dir: Path, root: Path) {
+        dir.walk(PathWalkOption.INCLUDE_DIRECTORIES).filter {
+            it.isDirectory()
+        }.forEach { subdir ->
+            registerDirectoryWatch(subdir, root)
         }
     }
 
@@ -409,6 +413,17 @@ internal class KefsFileWatcher(
 
         logger.debug("File watcher: dev kit dir is back $dir")
         deregisterWatchedDir(dir)
+
+        val repoRoot = localRepoRoots.find { it != dir && dir.startsWith(it) && watchedDirToRoot[it] == it }
+        if (repoRoot != null) {
+            // The directory stays a part of its local repo, so the changes there are still reported for the repo.
+            runCatching { registerSubtreeWatch(dir, repoRoot) }
+            if (watchedDirToKey[dir]?.isValid != true) return
+
+            callback.onDevKitDirChange(dir)
+            return
+        }
+
         registeredRoots.add(dir)
         registerDirectoryWatch(dir, dir)
         if (watchedDirToKey[dir]?.isValid != true) return

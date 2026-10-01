@@ -140,20 +140,33 @@ class KefsDevKitTest {
 
     @Test
     fun `cached jar name depends on content`() {
-        val name = KefsDevKit.cachedJarName("my-plugin", "0123456789abcdef0123456789abcdef")
+        val name = KefsDevKit.cachedJarName("my-plugin", "0a1b2c3d", "0123456789abcdef0123456789abcdef")
 
-        assertEquals("my-plugin-0123456789ab.jar", name)
-        assertEquals(true, KefsDevKit.isCachedJarOf("my-plugin", name))
-        assertEquals(false, KefsDevKit.isCachedJarOf("other-plugin", name))
+        assertEquals("my-plugin-0a1b2c3d-0123456789ab.jar", name)
+        assertEquals(true, KefsDevKit.isCachedJarOf("my-plugin", "0a1b2c3d", name))
+        assertEquals(false, KefsDevKit.isCachedJarOf("other-plugin", "0a1b2c3d", name))
     }
 
     @Test
     fun `cached jar of an artifact with a longer name is not matched`() {
-        val name = KefsDevKit.cachedJarName("my-plugin-cli", "0123456789abcdef0123456789abcdef")
+        val name = KefsDevKit.cachedJarName("my-plugin-cli", "0a1b2c3d", "0123456789abcdef0123456789abcdef")
 
-        assertEquals(true, KefsDevKit.isCachedJarOf("my-plugin-cli", name))
-        assertEquals(false, KefsDevKit.isCachedJarOf("my-plugin", name))
-        assertEquals(false, KefsDevKit.isCachedJarOf("my-plugin", "my-plugin-0123456789ab.jar.tmp"))
+        assertEquals(true, KefsDevKit.isCachedJarOf("my-plugin-cli", "0a1b2c3d", name))
+        assertEquals(false, KefsDevKit.isCachedJarOf("my-plugin", "0a1b2c3d", name))
+        assertEquals(
+            false,
+            KefsDevKit.isCachedJarOf("my-plugin", "0a1b2c3d", "my-plugin-0a1b2c3d-0123456789ab.jar.tmp"),
+        )
+    }
+
+    @Test
+    fun `cached jar of another source is not matched`() {
+        val first = KefsDevKit.sourceId(Path.of("/first/build/libs/my-plugin-1.0.0.jar"))
+        val second = KefsDevKit.sourceId(Path.of("/second/build/libs/my-plugin-1.0.0.jar"))
+        val name = KefsDevKit.cachedJarName("my-plugin", first, "0123456789abcdef0123456789abcdef")
+
+        assertEquals(true, KefsDevKit.isCachedJarOf("my-plugin", first, name))
+        assertEquals(false, KefsDevKit.isCachedJarOf("my-plugin", second, name))
     }
 
     @Test

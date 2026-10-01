@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.jar.JarFile
 import java.util.jar.Manifest
 import java.util.zip.ZipInputStream
+import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.io.path.name
 
 /**
@@ -191,17 +192,26 @@ internal object KefsDevKit {
      * Every content of a source jar gets its own file name in the cache.
      * A jar that is already loaded by the IDE is never overwritten this way.
      */
-    fun cachedJarName(artifact: String, checksum: String): String {
-        return "$artifact-${checksum.take(CACHED_CHECKSUM_LENGTH)}.jar"
+    fun cachedJarName(artifact: String, sourceId: String, checksum: String): String {
+        return "$artifact-$sourceId-${checksum.take(CACHED_CHECKSUM_LENGTH)}.jar"
     }
 
-    fun isCachedJarOf(artifact: String, fileName: String): Boolean {
-        if (!fileName.startsWith("$artifact-") || !fileName.endsWith(".jar")) {
+    /**
+     * The cache dir is shared between projects and IDEs. The id tells apart the jars of the same artifact
+     * that come from different locations, so one project never deletes the jars of another one.
+     */
+    fun sourceId(source: Path): String {
+        return "%08x".format(source.invariantSeparatorsPathString.hashCode())
+    }
+
+    fun isCachedJarOf(artifact: String, sourceId: String, fileName: String): Boolean {
+        val prefix = "$artifact-$sourceId-"
+        if (!fileName.startsWith(prefix) || !fileName.endsWith(".jar")) {
             return false
         }
 
-        // `my-plugin-cli-<checksum>.jar` is not a jar of `my-plugin`
-        val checksum = fileName.substring(artifact.length + 1, fileName.length - ".jar".length)
+        // `my-plugin-cli-<source>-<checksum>.jar` is not a jar of `my-plugin`
+        val checksum = fileName.substring(prefix.length, fileName.length - ".jar".length)
         return cachedChecksumRegex.matches(checksum)
     }
 
