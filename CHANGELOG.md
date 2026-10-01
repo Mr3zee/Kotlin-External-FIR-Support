@@ -6,6 +6,7 @@
 
 ### Added
 
+- Android Studio version 262.10968.63 support
 - Android Studio version 262.10315.125 support
 - Support for compiler plugins built with the [Compiler Plugin DevKit](https://github.com/Kotlin/compiler-plugin-dev-kit)
   (the dev kit is available only internally at JetBrains for now).
