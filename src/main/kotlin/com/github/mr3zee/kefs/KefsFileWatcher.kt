@@ -29,6 +29,7 @@ import kotlin.io.path.walk
 internal interface FileWatcherCallback {
     fun onLocalRepoChange(repoRoot: Path)
     fun onCacheDirExternalChange()
+    fun onDevKitDirChange(dir: Path) {}
 }
 
 internal class KefsFileWatcher(
@@ -44,6 +45,7 @@ internal class KefsFileWatcher(
     private val watchedDirToKey = ConcurrentHashMap<Path, WatchKey>()
     private val registeredRoots = ConcurrentHashMap.newKeySet<Path>()
     private val localRepoRoots = ConcurrentHashMap.newKeySet<Path>()
+    private val devKitRoots = ConcurrentHashMap.newKeySet<Path>()
     private val cacheDirSelfUpdates = AtomicLong(0)
     private val selfUpdateEndTimestamp = AtomicLong(0)
 
@@ -66,6 +68,28 @@ internal class KefsFileWatcher(
         registrationLock.withLock {
             if (ensureWatchServiceInitialized(normalized) == null) return@withLock
             registerDirectoryTreeWatch(normalized)
+        }
+    }
+
+    /**
+     * Watches a directory with a dev kit jar. Unlike local repos, only the directory itself is watched.
+     */
+    suspend fun registerDevKitDir(path: Path) {
+        val normalized = path.toAbsolutePath().normalize()
+        registrationLock.withLock {
+            if (ensureWatchServiceInitialized(normalized) == null) return@withLock
+            if (!registeredRoots.add(normalized)) return@withLock
+            if (!normalized.exists()) {
+                registeredRoots.remove(normalized)
+                return@withLock
+            }
+
+            devKitRoots.add(normalized)
+            runCatchingExceptCancellation {
+                withContext(Dispatchers.IO) {
+                    registerDirectoryWatch(normalized, normalized)
+                }
+            }
         }
     }
 
@@ -160,7 +184,11 @@ internal class KefsFileWatcher(
         if (!key.isValid || path == null) {
             val root = path?.let { watchedDirToRoot[it] }
             deregisterWatchedDir(path)
-            if (root != null && !isLocalRepoRoot(root)) {
+            if (root != null && isDevKitRoot(root)) {
+                // the directory is gone (e.g. a clean build), allow registering it again once it is back
+                devKitRoots.remove(root)
+                registeredRoots.remove(root)
+            } else if (root != null && !isLocalRepoRoot(root)) {
                 if (!isSelfUpdating()) {
                     logger.debug("File watcher: invalid key for cache dir $path, triggering external change")
                     callback.onCacheDirExternalChange()
@@ -179,7 +207,8 @@ internal class KefsFileWatcher(
         }
 
         val events = key.pollEvents()
-        val isCacheDir = !isLocalRepoRoot(root)
+        val isDevKitDir = isDevKitRoot(root)
+        val isCacheDir = !isLocalRepoRoot(root) && !isDevKitDir
 
         for (event in events) {
             val contextName = (event.context() as? Path) ?: continue
@@ -187,7 +216,7 @@ internal class KefsFileWatcher(
 
             when (event.kind()) {
                 StandardWatchEventKinds.ENTRY_CREATE -> {
-                    if (Files.isDirectory(resolved)) {
+                    if (!isDevKitDir && Files.isDirectory(resolved)) {
                         registerSubdirectoriesWatch(resolved, root)
                     }
                 }
@@ -216,7 +245,9 @@ internal class KefsFileWatcher(
             return true
         }
 
-        if (!isCacheDir) {
+        if (isDevKitDir) {
+            callback.onDevKitDirChange(root)
+        } else if (!isCacheDir) {
             callback.onLocalRepoChange(root)
         } else {
             if (!isSelfUpdating()) {
@@ -241,6 +272,7 @@ internal class KefsFileWatcher(
         registrationLock.withLock {
             cancelAllWatchKeys()
             localRepoRoots.clear()
+            devKitRoots.clear()
             watchService?.let { service ->
                 runCatchingExceptCancellation { service.close() }
             }
@@ -252,6 +284,7 @@ internal class KefsFileWatcher(
     override fun close() {
         cancelAllWatchKeys()
         localRepoRoots.clear()
+        devKitRoots.clear()
         watchService?.let { service ->
             runCatchingExceptCancellation { service.close() }
         }
@@ -274,17 +307,21 @@ internal class KefsFileWatcher(
                 dir.walk(PathWalkOption.INCLUDE_DIRECTORIES).filter {
                     it.isDirectory()
                 }.forEach { subdir ->
-                    if (watchedDirToRoot.putIfAbsent(subdir, root) == null) {
-                        val key = subdir.registerSafe(
-                            StandardWatchEventKinds.ENTRY_CREATE,
-                            StandardWatchEventKinds.ENTRY_MODIFY,
-                            StandardWatchEventKinds.ENTRY_DELETE,
-                        )
-                        if (key != null) {
-                            watchedDirToKey[subdir] = key
-                        }
-                    }
+                    registerDirectoryWatch(subdir, root)
                 }
+            }
+        }
+    }
+
+    private fun registerDirectoryWatch(dir: Path, root: Path) {
+        if (watchedDirToRoot.putIfAbsent(dir, root) == null) {
+            val key = dir.registerSafe(
+                StandardWatchEventKinds.ENTRY_CREATE,
+                StandardWatchEventKinds.ENTRY_MODIFY,
+                StandardWatchEventKinds.ENTRY_DELETE,
+            )
+            if (key != null) {
+                watchedDirToKey[dir] = key
             }
         }
     }
@@ -304,6 +341,10 @@ internal class KefsFileWatcher(
 
     private fun isLocalRepoRoot(root: Path): Boolean {
         return localRepoRoots.contains(root)
+    }
+
+    private fun isDevKitRoot(root: Path): Boolean {
+        return devKitRoots.contains(root)
     }
 
     private fun deregisterWatchedDir(dir: Path?) {

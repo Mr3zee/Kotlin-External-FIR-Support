@@ -9,7 +9,7 @@ import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.io.path.name
 import kotlin.to
 
-@Suppress("UnstableApiUsage")
+@Suppress("UnstableApiUsage", "JetBrainsInternalApiUsage")
 internal class KefsProvider : KotlinBundledFirCompilerPluginProvider {
     override fun provideBundledPluginJar(project: Project, userSuppliedPluginJar: Path): Path? {
         val storage = project.service<KefsStorage>()
@@ -17,6 +17,12 @@ internal class KefsProvider : KotlinBundledFirCompilerPluginProvider {
         try {
             if (isIgnored(userSuppliedPluginJar)) {
                 return null
+            }
+
+            // dev kit jars are self-sufficient and are loaded as is
+            val devKit = storage.getDevKitPluginPath(userSuppliedPluginJar)
+            if (devKit is DevKitLookup.Found) {
+                return devKit.path
             }
 
             val descriptor = userSuppliedPluginJar.toKotlinPluginDescriptorVersionedOrNull(project) ?: return null

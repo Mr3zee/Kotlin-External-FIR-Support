@@ -1312,7 +1312,7 @@ internal class KefsTree(
     private fun redrawModel() {
         rootNode.removeAllChildren()
 
-        val plugins = settings.safeState().plugins
+        val plugins = settings.allPlugins()
 
         val selectedNodeKey = state.getSelectedNodeKey(nodesByKey.keys)
         var selectedNode: DefaultMutableTreeNode? = null

@@ -7,6 +7,10 @@
 ### Added
 
 - Android Studio version 262.10315.125 support
+- Support for compiler plugins built with the [Compiler Plugin DevKit](https://github.com/Kotlin/compiler-plugin-dev-kit)
+  (the dev kit is available only internally at JetBrains for now).
+  Such jars are detected by their content and loaded as is, without any configuration, downloads or version matching.
+  Exception analysis, hot-reload and statuses in the tool window work for them as for any other plugin.
 
 ## [0.3.14] - 2026-08-17
 

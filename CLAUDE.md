@@ -57,6 +57,8 @@ Requires **JDK 21** (configured via Gradle toolchain). Uses **Gradle 9.2.0** wit
 
 5. **`KefsExceptionAnalyzerService`** monitors IDE exceptions and matches stack traces against loaded plugin classes (analyzed by `KefsJarAnalyzer`) to identify which plugin caused a crash.
 
+6. **Compiler Plugin DevKit jars** (`KefsDevKit.kt`) bypass descriptors and `KefsJarLocator` entirely. `KefsProvider` asks `KefsStorage.getDevKitPluginPath` first: a jar with the `Kotlin-Compiler-Plugin-Multi-Release` manifest attribute and `META-INF/kotlin/plugin/<pluginId>/versions/` is self-sufficient, so it is only copied into the cache dir under a content-based name (a loaded jar is never overwritten) and stored in `pluginsCache` like any other artifact. The plugin name is the dev kit plugin id; descriptors are synthesized by `KefsDevKitRegistry` (not stored in settings, disabled ids live in the workspace file). The directory of the source jar is watched for hot-reload.
+
 ### Requested, Resolved, and Kotlin versions
 'Version' word of an artifact can relate to different things.
 All compiler plugins have a Kotlin and a Library version. By default, an artifact looks like this:

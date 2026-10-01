@@ -35,6 +35,15 @@ The KEFS plugin and the guide below will help you make your users happy\*.
 We are thinking on how we can make the process easier for plugin authors. 
 KEFS is the first step.
 
+> If you build your plugin with the [Compiler Plugin DevKit](https://github.com/Kotlin/compiler-plugin-dev-kit),
+> most of this guide is not needed.
+> The dev kit puts builds for all supported Kotlin compiler versions into a single jar,
+> and KEFS loads such a jar as is: no publishing of IDE-specific versions, no KEFS configuration,
+> and "hot-reload" works for the jar in your build directory.
+> See the [usage guide](GUIDE.md#7-compiler-plugin-devkit-plugins) for details.
+>
+> Note: the dev kit is available only internally at JetBrains for now.
+
 ## 1. Plugin Development
 
 > Use the [Template](https://github.com/Kotlin/compiler-plugin-template) to get started.
@@ -234,4 +243,4 @@ Read more about how to set up replacement patterns in [KEFS Guide](GUIDE.md#6-ad
 
 ## 5. Troubleshooting
 
-If you encounter issues while developing or testing your plugin with KEFS, refer to the [Troubleshooting](GUIDE.md#7-troubleshooting) section in the main guide.
+If you encounter issues while developing or testing your plugin with KEFS, refer to the [Troubleshooting](GUIDE.md#8-troubleshooting) section in the main guide.

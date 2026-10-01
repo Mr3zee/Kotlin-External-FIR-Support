@@ -356,7 +356,29 @@ These examples in UI (except version pattern uses `+` as a demonstration):
 
 ---
 
-## 7. Troubleshooting
+## 7. Compiler Plugin DevKit Plugins
+
+Compiler plugins built with the [Compiler Plugin DevKit](https://github.com/Kotlin/compiler-plugin-dev-kit)
+are supported out of the box and are not configured in the settings.
+
+> The dev kit is available only internally at JetBrains for now.
+
+A dev kit jar contains a build of the plugin for every Kotlin compiler version it supports
+and chooses the right one itself in runtime. KEFS detects such jars by their content
+(the `Kotlin-Compiler-Plugin-Multi-Release` manifest attribute and the `META-INF/kotlin/plugin/<plugin-id>/versions` directory)
+and loads the very jar that is used in the project:
+
+* No repositories, downloads or version matching are involved. The jar is only copied into the KEFS cache directory.
+* The plugin appears in the <kbd>KEFS Diagnostics</kbd> tool window once it is requested by the IDE.
+  It is named after its dev kit plugin id, with the jar name and version below it.
+* Runtime exceptions are analyzed as for any other plugin, including the editor notification,
+  failure reports and auto-disabling. A disabled dev kit plugin can be enabled back from the tool window.
+  Classes of the dependencies embedded into the jar are not used for exception matching.
+* "Hot-reload" works without any setup: KEFS watches the directory of the original jar
+  (for example, `build/libs` of your compiler plugin module) and reloads the plugin when the jar is rebuilt.
+  The **Update** action checks the jars for changes too.
+
+## 8. Troubleshooting
 
 Sometimes things don't work as expected. This section covers common issues and how to resolve them.
 

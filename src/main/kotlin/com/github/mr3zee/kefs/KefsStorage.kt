@@ -25,6 +25,7 @@ import org.jetbrains.kotlin.analysis.api.KaPlatformInterface
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinCompilerPluginsProvider
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -35,6 +36,8 @@ import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
+import kotlin.io.path.extension
+import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.time.Duration.Companion.minutes
 
@@ -94,6 +97,13 @@ private fun ArtifactState.toStatus(): ArtifactStatus {
             KefsBundle.message("status.notFound")
         )
     }
+}
+
+internal sealed interface DevKitLookup {
+    object NotDevKit : DevKitLookup
+
+    // null path means the jar is not ready to be loaded yet (or the plugin is disabled)
+    class Found(val path: Path?) : DevKitLookup
 }
 
 internal interface KotlinPluginStatusUpdater {
@@ -208,6 +218,11 @@ internal class KefsStorage(
         override fun onCacheDirExternalChange() {
             clearState()
         }
+
+        override fun onDevKitDirChange(dir: Path) {
+            logger.debug("File watcher detected changes in dev kit dir: $dir")
+            recheckDevKitJars(dir)
+        }
     })
 
     @Suppress("UnstableApiUsage")
@@ -229,6 +244,17 @@ internal class KefsStorage(
 
     private val lifecycleCache = ConcurrentHashMap<Pair<String, RequestedVersion>, Map<String, Path>>()
 
+    private class DevKitSource(
+        val pluginName: String,
+        val key: RequestedPluginKey,
+        val stamp: FileStamp,
+    )
+
+    // source jar -> what was loaded from it, the state itself is stored in pluginsCache
+    private val devKitSources = ConcurrentHashMap<Path, DevKitSource>()
+    private val devKitDetections = ConcurrentHashMap<Path, Pair<FileStamp, DevKitJarInfo?>>()
+    private val devKitJobs = ConcurrentHashMap<Path, Job>()
+
     private val lastProvideCallTimestamp = AtomicLong(0)
     private val providerCallInProgress = AtomicLong(0L)
     private val invalidationJob = AtomicReference<Job?>(null)
@@ -238,6 +264,9 @@ internal class KefsStorage(
 
         private const val INVALIDATION_DEBOUNCE_BASE_MS = 750L
         private const val INVALIDATION_DEBOUNCE_EXTENDED_MS = 2000L
+
+        private const val DEVKIT_STABILITY_DELAY_MS = 300L
+        private const val DEVKIT_STABILITY_ATTEMPTS = 20
     }
 
     private val invalidationDebounceMs: Long
@@ -276,9 +305,13 @@ internal class KefsStorage(
             actualizerJobs.clear()
             indexJobs.values.forEach { it.cancelAndJoin() }
             indexJobs.clear()
+            devKitJobs.values.forEach { it.cancelAndJoin() }
+            devKitJobs.clear()
 
             pluginsCache.clear()
             lifecycleCache.clear()
+            devKitSources.clear()
+            devKitDetections.clear()
 
             fileWatcher.reset()
 
@@ -384,6 +417,9 @@ internal class KefsStorage(
             lifecycleCache.clear()
             actualizerJobs.clear()
             indexJobs.clear()
+            devKitJobs.clear()
+            devKitSources.clear()
+            devKitDetections.clear()
             fileWatcher.close()
             fileWatcherThread.shutdown()
             invalidationJob.get()?.cancel()
@@ -434,11 +470,22 @@ internal class KefsStorage(
                 actualizePlugin(plugin, cached)
             }
         }
+
+        // dev kit jars located in a local repo are watched as a part of it
+        recheckDevKitJars(repoRoot)
     }
 
     fun runActualization() {
         logger.debug("Requested actualization")
+        recheckDevKitJars(null)
+
+        val devKit = project.service<KefsDevKitRegistry>()
         pluginsCache.forEach { (pluginName, artifacts) ->
+            // dev kit jars are not looked up in repositories
+            if (devKit.isDevKit(pluginName)) {
+                return@forEach
+            }
+
             val plugin = project.service<KefsSettings>().pluginByName(pluginName)
                 ?: return@forEach
 
@@ -784,6 +831,281 @@ internal class KefsStorage(
         )
 
         return state.jar.path
+    }
+
+    fun getDevKitPluginPath(userSuppliedPluginJar: Path): DevKitLookup {
+        if (userSuppliedPluginJar.extension != "jar") {
+            return DevKitLookup.NotDevKit
+        }
+
+        val source = runCatching { userSuppliedPluginJar.toAbsolutePath().normalize() }.getOrNull()
+            ?: return DevKitLookup.NotDevKit
+
+        val known = devKitSources[source]
+        val stamp = KefsDevKit.stampOf(source)
+        val registry = project.service<KefsDevKitRegistry>()
+
+        if (known == null) {
+            val info = stamp?.let { detectDevKit(source, it) } ?: return DevKitLookup.NotDevKit
+
+            if (!registry.isEnabled(info.pluginId)) {
+                // make the disabled plugin visible in the UI, so it can be enabled back
+                if (registry.register(info.pluginId, KefsDevKit.artifactAndVersion(source).first)) {
+                    statusPublisher.redraw()
+                }
+                return DevKitLookup.Found(null)
+            }
+        } else if (!registry.isEnabled(known.pluginName)) {
+            return DevKitLookup.Found(null)
+        }
+
+        if (invalidationJob.get() != null) {
+            logger.debug("Invalidation pending for the dev kit jar $source")
+            return DevKitLookup.Found(null)
+        }
+
+        // The source jar is unchanged, or it is gone for a moment (for example, during a rebuild).
+        // In both cases the last loaded jar is the one to use.
+        if (known != null && (stamp == null || stamp == known.stamp)) {
+            when (val state = pluginsCache[known.pluginName]?.get(known.key)) {
+                is ArtifactState.Cached -> if (state.jar.path.exists()) {
+                    publishDevKitStatus(known, state, isNew = false)
+                    return DevKitLookup.Found(state.jar.path)
+                }
+
+                // the same jar would fail the same way, wait for it to change
+                is ArtifactState.FailedToFetch -> return DevKitLookup.Found(null)
+
+                else -> {}
+            }
+        }
+
+        loadDevKitJar(source)
+        return DevKitLookup.Found(null)
+    }
+
+    private fun detectDevKit(source: Path, stamp: FileStamp): DevKitJarInfo? {
+        devKitDetections[source]?.let { (detectedStamp, info) ->
+            if (detectedStamp == stamp) {
+                return info
+            }
+        }
+
+        return KefsDevKit.detect(source).also {
+            devKitDetections[source] = stamp to it
+        }
+    }
+
+    private fun recheckDevKitJars(dir: Path?) {
+        devKitSources.forEach { (source, known) ->
+            if (dir != null && !source.startsWith(dir)) {
+                return@forEach
+            }
+
+            // a missing jar is expected to be back after a rebuild
+            val stamp = KefsDevKit.stampOf(source) ?: return@forEach
+            if (stamp != known.stamp) {
+                loadDevKitJar(source)
+            }
+        }
+    }
+
+    private fun loadDevKitJar(source: Path) {
+        devKitJobs.compute(source) { _, running ->
+            if (running?.isActive == true) {
+                logger.debug("Dev kit jar is already being loaded: $source")
+                running
+            } else {
+                scope.launch(CoroutineName("devkit-loader-${source.name}")) {
+                    var changed = false
+                    while (true) {
+                        // a jar can be requested or reported by the file watcher while it is still being written
+                        val stamp = awaitStableStamp(source) ?: break
+                        if (loadDevKitJar(source, stamp)) {
+                            changed = true
+                        }
+
+                        if (KefsDevKit.stampOf(source) == stamp) {
+                            break
+                        }
+                    }
+
+                    source.parent?.let { fileWatcher.registerDevKitDir(it) }
+
+                    if (changed) {
+                        invalidateKotlinPluginCache()
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun awaitStableStamp(source: Path): FileStamp? {
+        var stamp = KefsDevKit.stampOf(source) ?: return null
+        repeat(DEVKIT_STABILITY_ATTEMPTS) {
+            delay(DEVKIT_STABILITY_DELAY_MS)
+            val next = KefsDevKit.stampOf(source) ?: return null
+            if (next == stamp) {
+                return stamp
+            }
+            stamp = next
+        }
+        return stamp
+    }
+
+    /**
+     * Copies the dev kit jar into the cache dir and registers it as loaded.
+     * Returns true if what is provided to the IDE has changed.
+     */
+    private suspend fun loadDevKitJar(source: Path, stamp: FileStamp): Boolean = withContext(Dispatchers.IO) {
+        val known = devKitSources[source]
+        val oldState = known?.let { pluginsCache[it.pluginName]?.get(it.key) }
+
+        val info = detectDevKit(source, stamp)
+        if (info == null) {
+            logger.debug("Not a dev kit jar anymore: $source")
+            if (known != null) {
+                devKitSources.remove(source)
+                pluginsCache[known.pluginName]?.remove(known.key)
+            }
+            return@withContext oldState is ArtifactState.Cached
+        }
+
+        val (artifact, version) = KefsDevKit.artifactAndVersion(source)
+        val pluginName = info.pluginId
+
+        // jars with the same name from different locations are different versions for the UI
+        val isNameTaken = devKitSources.any { (otherSource, other) ->
+            otherSource != source && other.pluginName == pluginName &&
+                    other.key == RequestedPluginKey(artifact, version.requested())
+        }
+        val requestedVersion = when {
+            isNameTaken -> "$version-${Integer.toHexString(source.hashCode())}"
+            else -> version
+        }.requested()
+
+        val key = RequestedPluginKey(artifact, requestedVersion)
+        val loaded = DevKitSource(pluginName, key, stamp)
+
+        if (known != null && (known.pluginName != pluginName || known.key != key)) {
+            pluginsCache[known.pluginName]?.remove(known.key)
+        }
+
+        if (project.service<KefsDevKitRegistry>().register(pluginName, artifact)) {
+            statusPublisher.redraw()
+        }
+
+        statusPublisher.updateVersion(pluginName, artifact, requestedVersion, ArtifactStatus.InProgress)
+
+        val artifactsMap = pluginsCache.getOrPut(pluginName) { ConcurrentHashMap() }
+
+        val selfUpdate = fileWatcher.markSelfUpdateStart()
+        val jarResult = runCatchingExceptCancellation {
+            try {
+                copyDevKitJar(source, pluginName, artifact, requestedVersion)
+            } finally {
+                selfUpdate.end()
+            }
+        }
+
+        val jar = jarResult.getOrElse { e ->
+            logger.warn("Failed to load the dev kit jar $source", e)
+
+            val failed = ArtifactState.FailedToFetch("Failed to copy $source: ${e::class}: ${e.message}")
+            artifactsMap[key] = failed
+            devKitSources[source] = loaded
+            publishDevKitStatus(loaded, failed, isNew = false)
+            statusPublisher.redraw()
+
+            return@withContext oldState is ArtifactState.Cached
+        }
+
+        val isNew = (oldState as? ArtifactState.Cached)?.jar?.let {
+            it.checksum != jar.checksum || it.path != jar.path
+        } ?: true
+
+        val state = ArtifactState.Cached(
+            jar = jar,
+            requestedVersion = requestedVersion,
+            resolvedVersion = requestedVersion.asResolvedForDiskSearch(),
+            criteria = KotlinPluginDescriptor.VersionMatching.EXACT,
+            origin = KefsDevKit.repository(source),
+        )
+
+        artifactsMap[key] = state
+        devKitSources[source] = loaded
+
+        logger.debug(
+            "Loaded the dev kit jar $source (${info.pluginId}, Kotlin versions: ${info.kotlinVersions}) " +
+                    "as ${jar.path.name}, new: $isNew"
+        )
+
+        if (isNew) {
+            discoveryPublisher.discoveredSync(
+                pluginName = pluginName,
+                mavenId = artifact,
+                requestedVersion = state.requestedVersion,
+                resolvedVersion = state.resolvedVersion,
+                origin = state.origin,
+                jar = jar.path,
+                checksum = jar.checksum,
+                isLocal = jar.isLocal,
+                kotlinVersionMismatch = jar.kotlinVersionMismatch,
+            )
+        }
+
+        publishDevKitStatus(loaded, state, isNew)
+        statusPublisher.redraw()
+
+        isNew
+    }
+
+    private suspend fun copyDevKitJar(
+        source: Path,
+        pluginName: String,
+        artifact: String,
+        requestedVersion: RequestedVersion,
+    ): Jar {
+        val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
+        val destination = cacheDirectory(kotlinIdeVersion, pluginName, requestedVersion)
+            ?: error("Failed to find cache directory for $pluginName $requestedVersion")
+
+        val checksum = md5(source).asChecksum()
+        val jarPath = destination.resolve(KefsDevKit.cachedJarName(artifact, checksum))
+
+        if (!jarPath.exists() || md5(jarPath).asChecksum() != checksum) {
+            val temp = jarPath.resolveSibling("${jarPath.name}.tmp")
+            Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING)
+            Files.move(temp, jarPath, StandardCopyOption.REPLACE_EXISTING)
+        }
+
+        // previous versions of the jar, the ones still loaded by the IDE may fail to be deleted
+        runCatching {
+            destination.listDirectoryEntries()
+                .filter { it != jarPath && KefsDevKit.isCachedJarOf(artifact, it.name) }
+                .forEach { stale -> runCatching { Files.deleteIfExists(stale) } }
+        }
+
+        return Jar(path = jarPath, checksum = checksum, isLocal = true, kotlinVersionMismatch = null)
+    }
+
+    private fun publishDevKitStatus(source: DevKitSource, state: ArtifactState, isNew: Boolean) {
+        val mavenId = source.key.mavenId
+        val requestedVersion = source.key.requestedVersion
+
+        val cached = state as? ArtifactState.Cached
+        val hasExceptions = !isNew && cached != null &&
+                project.service<KefsExceptionReporter>().hasExceptions(source.pluginName, mavenId, requestedVersion)
+
+        val status = if (cached != null && hasExceptions) {
+            ArtifactStatus.ExceptionInRuntime(
+                jarId = JarId(source.pluginName, mavenId, requestedVersion, cached.resolvedVersion)
+            )
+        } else {
+            state.toStatus()
+        }
+
+        statusPublisher.updateVersion(source.pluginName, mavenId, requestedVersion, status)
     }
 
     private fun updateCacheFromDisk(

@@ -38,8 +38,10 @@ internal object KefsJarAnalyzer {
             while (entry != null) {
                 if (!entry.isDirectory) {
                     val name = entry.name
-                    if (name.endsWith(".class")) {
-                        val base = name.removeSuffix(".class")
+                    // classes of dev kit jars are stored per Kotlin version, null for the ones that are not analyzed
+                    val classPath = if (name.endsWith(".class")) KefsDevKit.runtimeClassPath(name) else null
+                    if (classPath != null) {
+                        val base = classPath.removeSuffix(".class")
 
                         // Exclude special descriptors
                         val skip = base == "module-info" || base.endsWith("module-info") ||

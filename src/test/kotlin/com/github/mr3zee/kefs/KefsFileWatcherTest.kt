@@ -26,6 +26,7 @@ class KefsFileWatcherTest {
 
     private val localRepoChanges = CopyOnWriteArrayList<Path>()
     private val cacheDirChangeCount = AtomicInteger(0)
+    private val devKitDirChanges = CopyOnWriteArrayList<Path>()
 
     @Before
     fun setUp(): Unit = runBlocking {
@@ -40,6 +41,10 @@ class KefsFileWatcherTest {
 
             override fun onCacheDirExternalChange() {
                 cacheDirChangeCount.incrementAndGet()
+            }
+
+            override fun onDevKitDirChange(dir: Path) {
+                devKitDirChanges.add(dir)
             }
         })
 
@@ -415,6 +420,25 @@ class KefsFileWatcherTest {
         } finally {
             freshWatcher.close()
         }
+    }
+
+    // --- Dev Kit Dir Tests ---
+
+    @Test
+    fun testDevKitDirJarChange(): Unit = runBlocking {
+        val devKitDir = tempDir.resolve("build/libs").also { it.createDirectories() }
+        val jar = devKitDir.resolve("plugin.jar")
+        createFile(jar, "original")
+
+        watcher.registerDevKitDir(devKitDir)
+
+        modifyFile(jar, "modified")
+
+        awaitCondition { devKitDirChanges.isNotEmpty() }
+
+        assertEquals(devKitDir.toAbsolutePath().normalize(), devKitDirChanges.first())
+        assertEquals("Dev kit dir must not be treated as a cache dir", 0, cacheDirChangeCount.get())
+        assertTrue("Dev kit dir must not be treated as a local repo", localRepoChanges.isEmpty())
     }
 
     // --- Helpers ---

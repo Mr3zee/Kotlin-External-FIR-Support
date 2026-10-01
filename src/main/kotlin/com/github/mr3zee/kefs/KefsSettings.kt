@@ -55,8 +55,20 @@ internal class KefsSettings(
         }
     }
 
+    private val devKit get() = project.service<KefsDevKitRegistry>()
+
+    /**
+     * Configured plugins and the dev kit plugins discovered in this session.
+     */
+    fun allPlugins(): List<KotlinPluginDescriptor> {
+        val configured = safeState().plugins
+        val names = configured.map { it.name }.toSet()
+
+        return configured + devKit.descriptors().filter { it.name !in names }
+    }
+
     fun pluginByName(name: String): KotlinPluginDescriptor? {
-        return safeState().plugins.find { it.name == name }
+        return safeState().plugins.find { it.name == name } ?: devKit.descriptorByName(name)
     }
 
     fun enablePlugin(pluginName: String) {
@@ -71,6 +83,10 @@ internal class KefsSettings(
                     if (p.name in set) p.copy(enabled = true) else p
                 }
             )
+        }
+
+        if (devKit.setEnabled(set, enabled = true)) {
+            project.service<KefsStorage>().clearState()
         }
     }
 
@@ -91,11 +107,17 @@ internal class KefsSettings(
                 }
             )
         }
+
+        if (devKit.setEnabled(set, enabled = false)) {
+            disabled = true
+            project.service<KefsStorage>().clearState()
+        }
+
         return disabled
     }
 
     fun isEnabled(pluginName: String): Boolean {
-        return safeState().plugins.find { it.name == pluginName }?.enabled ?: false
+        return pluginByName(pluginName)?.enabled ?: false
     }
 
     fun updateToNewState(

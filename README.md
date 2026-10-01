@@ -58,6 +58,15 @@ configurable list of Maven repositories (including local ones).
   changes. When you re-publish a new version of your plugin locally, KEFS detects the file change
   and reloads it in the IDE automatically.
 
+#### Compiler Plugin DevKit
+
+Plugins built with the [Compiler Plugin DevKit](https://github.com/Kotlin/compiler-plugin-dev-kit)
+need no configuration at all. Their jars already contain a build for every supported Kotlin compiler version,
+so KEFS detects them by their content and loads them as is – nothing is searched for or downloaded.
+Exception analysis, hot-reload and the diagnostics UI work for them the same way.
+
+> The dev kit is available only internally at JetBrains for now.
+
 ### 2. Exception Analysis
 
 Compiler plugins should *never* throw exceptions, as this can freeze IDE analysis.
