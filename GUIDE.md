@@ -383,6 +383,7 @@ and loads the very jar that is used in the project:
   The jar is loaded again once it is rebuilt.
 * "Hot-reload" works without any setup: KEFS watches the directory of the original jar
   (for example, `build/libs` of your compiler plugin module) and reloads the plugin when the jar is rebuilt.
+  Watches are restored automatically after a clean build deletes the directory and its parent.
   The **Update** action checks the jars for changes too.
 
 ## 8. Troubleshooting

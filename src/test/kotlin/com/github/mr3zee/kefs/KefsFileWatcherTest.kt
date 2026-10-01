@@ -476,9 +476,10 @@ class KefsFileWatcherTest {
 
     @OptIn(ExperimentalPathApi::class)
     @Test
-    fun testDevKitDirParentDeleted(): Unit = runBlocking {
+    fun testDevKitDirParentDeletedAndCreatedAgain(): Unit = runBlocking {
         val devKitDir = tempDir.resolve("build/libs").also { it.createDirectories() }
-        createFile(devKitDir.resolve("plugin.jar"), "original")
+        val jar = devKitDir.resolve("plugin.jar")
+        createFile(jar, "original")
 
         watcher.registerDevKitDir(devKitDir)
 
@@ -488,8 +489,39 @@ class KefsFileWatcherTest {
 
         processEventsFor(12000)
 
+        devKitDirChanges.clear()
+
+        // Both watches are gone; polling must recover even without a parent event.
+        createFile(jar, "rebuilt")
+        awaitCondition(timeoutMs = 5000) { devKitDirChanges.isNotEmpty() }
+        assertEquals(devKitDir.toAbsolutePath().normalize(), devKitDirChanges.first())
+
+        processEventsFor(1500)
+        devKitDirChanges.clear()
+        modifyFile(jar, "modified after recovery")
+        awaitCondition { devKitDirChanges.isNotEmpty() }
+
         assertEquals("Lost parent of a dev kit dir must not be treated as a cache dir", 0, cacheDirChangeCount.get())
         assertTrue("Lost parent of a dev kit dir must not be treated as a local repo", localRepoChanges.isEmpty())
+    }
+
+    @Test
+    fun testDevKitPollingOnlyReportsRecoveredWatches(): Unit = runBlocking {
+        val devKitDir = tempDir.resolve("build/libs").also { it.createDirectories() }
+        createFile(devKitDir.resolve("plugin.jar"), "original")
+        watcher.registerDevKitDir(devKitDir)
+
+        processEventsFor(2500)
+        assertTrue("Healthy watches must not trigger jar rechecks", devKitDirChanges.isEmpty())
+
+        watcher.cancelAllWatchKeys()
+        awaitCondition(timeoutMs = 5000) { devKitDirChanges.isNotEmpty() }
+        assertEquals(devKitDir.toAbsolutePath().normalize(), devKitDirChanges.single())
+
+        processEventsFor(2500)
+        assertEquals("Polling must not repeatedly report a restored watch", 1, devKitDirChanges.size)
+        assertEquals("Recovery must not invalidate the cache", 0, cacheDirChangeCount.get())
+        assertTrue("Recovery must not trigger local repo changes", localRepoChanges.isEmpty())
     }
 
     // --- Helpers ---

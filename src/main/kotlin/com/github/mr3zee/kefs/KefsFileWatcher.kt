@@ -49,6 +49,7 @@ internal class KefsFileWatcher(
 
     // parents of the dev kit dirs that are watched only to notice a deleted dev kit dir being created again
     private val devKitParentRoots = ConcurrentHashMap.newKeySet<Path>()
+    private val lastDevKitRecoveryNanos = AtomicLong(0)
     private val cacheDirSelfUpdates = AtomicLong(0)
     private val selfUpdateEndTimestamp = AtomicLong(0)
 
@@ -78,28 +79,23 @@ internal class KefsFileWatcher(
      * Watches a directory with a dev kit jar. Unlike local repos, only the directory itself is watched.
      *
      * Its parent is watched as well: a rebuild may delete the directory and create it again.
-     * If the parent is deleted too, the watch is lost until the directory is registered again.
+     * Missing watches are also checked once a second, so deleting the parent doesn't lose hot-reload.
      */
     suspend fun registerDevKitDir(path: Path) {
         val normalized = path.toAbsolutePath().normalize()
         registrationLock.withLock {
             if (ensureWatchServiceInitialized(normalized) == null) return@withLock
             if (!registeredRoots.add(normalized)) return@withLock
+            devKitRoots.add(normalized)
             if (!normalized.exists()) {
                 registeredRoots.remove(normalized)
                 return@withLock
             }
 
-            devKitRoots.add(normalized)
             runCatchingExceptCancellation {
                 withContext(Dispatchers.IO) {
                     registerDirectoryWatch(normalized, normalized)
-
-                    val parent = normalized.parent
-                    if (parent != null && !watchedDirToRoot.containsKey(parent)) {
-                        devKitParentRoots.add(parent)
-                        registerDirectoryWatch(parent, parent)
-                    }
+                    registerDevKitParentWatch(normalized)
                 }
             }
         }
@@ -160,6 +156,7 @@ internal class KefsFileWatcher(
 
     companion object {
         internal const val SELF_UPDATE_GRACE_PERIOD_MS = 2000L
+        private const val DEVKIT_RECOVERY_PERIOD_NANOS = 1_000_000_000L
     }
 
     /**
@@ -175,9 +172,11 @@ internal class KefsFileWatcher(
             return false
         }
 
+        recoverDevKitDirWatches()
+
         val key = try {
             withContext(Dispatchers.IO) {
-                service.poll(1000, TimeUnit.MILLISECONDS)
+                service.poll(pollTimeoutMillis(), TimeUnit.MILLISECONDS)
             }
         } catch (_: ClosedWatchServiceException) {
             // The service was closed concurrently (e.g. reset() during a state clear).
@@ -204,7 +203,7 @@ internal class KefsFileWatcher(
             deregisterWatchedDir(path)
             if (root != null && isDevKitRoot(root)) {
                 // The directory is gone, e.g. deleted by a rebuild. It stays a dev kit root:
-                // the watch is restored when its parent reports that it is created again.
+                // the watch is restored by its parent or the periodic recovery check.
                 registeredRoots.remove(root)
             } else if (root != null && devKitParentRoots.remove(root)) {
                 logger.debug("File watcher: lost the parent of a dev kit dir $path")
@@ -303,6 +302,7 @@ internal class KefsFileWatcher(
             localRepoRoots.clear()
             devKitRoots.clear()
             devKitParentRoots.clear()
+            lastDevKitRecoveryNanos.set(0)
             watchService?.let { service ->
                 runCatchingExceptCancellation { service.close() }
             }
@@ -316,6 +316,7 @@ internal class KefsFileWatcher(
         localRepoRoots.clear()
         devKitRoots.clear()
         devKitParentRoots.clear()
+        lastDevKitRecoveryNanos.set(0)
         watchService?.let { service ->
             runCatchingExceptCancellation { service.close() }
         }
@@ -357,6 +358,47 @@ internal class KefsFileWatcher(
         }
     }
 
+    private suspend fun recoverDevKitDirWatches() {
+        if (devKitRoots.isEmpty()) return
+
+        // Event bursts must not turn recovery into repeated filesystem checks.
+        val now = System.nanoTime()
+        val previous = lastDevKitRecoveryNanos.get()
+        if (previous != 0L && now - previous < DEVKIT_RECOVERY_PERIOD_NANOS) return
+        if (!lastDevKitRecoveryNanos.compareAndSet(previous, now)) return
+
+        // Healthy watches need only an in-memory check, with no IO dispatch or directory scan.
+        if (devKitRoots.none { watchedDirToKey[it]?.isValid != true }) return
+
+        registrationLock.withLock {
+            withContext(Dispatchers.IO) {
+                devKitRoots.forEach { restoreDevKitDirWatch(it) }
+            }
+        }
+    }
+
+    private fun pollTimeoutMillis(): Long {
+        val previous = lastDevKitRecoveryNanos.get()
+        if (devKitRoots.isEmpty() || previous == 0L) return 1000L
+
+        // A quiet watch service must not delay recovery after an event burst.
+        val remaining = (DEVKIT_RECOVERY_PERIOD_NANOS - (System.nanoTime() - previous))
+            .coerceIn(0L, DEVKIT_RECOVERY_PERIOD_NANOS)
+        return TimeUnit.NANOSECONDS.toMillis(remaining + 999_999L)
+    }
+
+    private fun registerDevKitParentWatch(dir: Path) {
+        val parent = dir.parent ?: return
+        if (watchedDirToRoot.containsKey(parent)) {
+            // Preserve a parent already watched as part of a local repo or the cache.
+            if (parent !in devKitParentRoots || watchedDirToKey[parent]?.isValid == true) return
+            deregisterWatchedDir(parent)
+        }
+
+        devKitParentRoots.add(parent)
+        registerDirectoryWatch(parent, parent)
+    }
+
     /**
      * Watches a dev kit dir that was deleted and is created again.
      */
@@ -369,6 +411,8 @@ internal class KefsFileWatcher(
         deregisterWatchedDir(dir)
         registeredRoots.add(dir)
         registerDirectoryWatch(dir, dir)
+        if (watchedDirToKey[dir]?.isValid != true) return
+        registerDevKitParentWatch(dir)
 
         // the jar could be created before the directory is watched again
         callback.onDevKitDirChange(dir)

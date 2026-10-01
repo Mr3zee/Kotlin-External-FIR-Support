@@ -921,14 +921,19 @@ internal class KefsStorage(
     }
 
     private fun recheckDevKitJars(dir: Path?) {
-        devKitSources.forEach { (source, known) ->
+        // Incomplete jars may not have a plugin id yet, but their watched sources still need to be rechecked.
+        val incompleteSources = devKitDetections.filterValues { (_, detection) ->
+            detection is DevKitDetection.Incomplete
+        }.keys
+
+        (devKitSources.keys + incompleteSources).forEach { source ->
             if (dir != null && !source.startsWith(dir)) {
                 return@forEach
             }
 
             // a missing jar is expected to be back after a rebuild
             val stamp = KefsDevKit.stampOf(source) ?: return@forEach
-            if (stamp != known.stamp) {
+            if (stamp != devKitSources[source]?.stamp) {
                 loadDevKitJar(source)
             }
         }
