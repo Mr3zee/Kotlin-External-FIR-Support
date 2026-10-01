@@ -46,6 +46,9 @@ internal class KefsFileWatcher(
     private val registeredRoots = ConcurrentHashMap.newKeySet<Path>()
     private val localRepoRoots = ConcurrentHashMap.newKeySet<Path>()
     private val devKitRoots = ConcurrentHashMap.newKeySet<Path>()
+
+    // parents of the dev kit dirs that are watched only to notice a deleted dev kit dir being created again
+    private val devKitParentRoots = ConcurrentHashMap.newKeySet<Path>()
     private val cacheDirSelfUpdates = AtomicLong(0)
     private val selfUpdateEndTimestamp = AtomicLong(0)
 
@@ -73,6 +76,9 @@ internal class KefsFileWatcher(
 
     /**
      * Watches a directory with a dev kit jar. Unlike local repos, only the directory itself is watched.
+     *
+     * Its parent is watched as well: a rebuild may delete the directory and create it again.
+     * If the parent is deleted too, the watch is lost until the directory is registered again.
      */
     suspend fun registerDevKitDir(path: Path) {
         val normalized = path.toAbsolutePath().normalize()
@@ -88,6 +94,12 @@ internal class KefsFileWatcher(
             runCatchingExceptCancellation {
                 withContext(Dispatchers.IO) {
                     registerDirectoryWatch(normalized, normalized)
+
+                    val parent = normalized.parent
+                    if (parent != null && !watchedDirToRoot.containsKey(parent)) {
+                        devKitParentRoots.add(parent)
+                        registerDirectoryWatch(parent, parent)
+                    }
                 }
             }
         }
@@ -182,12 +194,20 @@ internal class KefsFileWatcher(
         val path = rawPath?.let { findWatchedPath(it) } ?: rawPath
 
         if (!key.isValid || path == null) {
+            val currentKey = path?.let { watchedDirToKey[it] }
+            if (currentKey != null && currentKey !== key && currentKey.isValid) {
+                // a stale key of a directory that was deleted and is already watched again
+                return true
+            }
+
             val root = path?.let { watchedDirToRoot[it] }
             deregisterWatchedDir(path)
             if (root != null && isDevKitRoot(root)) {
-                // the directory is gone (e.g. a clean build), allow registering it again once it is back
-                devKitRoots.remove(root)
+                // The directory is gone, e.g. deleted by a rebuild. It stays a dev kit root:
+                // the watch is restored when its parent reports that it is created again.
                 registeredRoots.remove(root)
+            } else if (root != null && devKitParentRoots.remove(root)) {
+                logger.debug("File watcher: lost the parent of a dev kit dir $path")
             } else if (root != null && !isLocalRepoRoot(root)) {
                 if (!isSelfUpdating()) {
                     logger.debug("File watcher: invalid key for cache dir $path, triggering external change")
@@ -208,15 +228,22 @@ internal class KefsFileWatcher(
 
         val events = key.pollEvents()
         val isDevKitDir = isDevKitRoot(root)
-        val isCacheDir = !isLocalRepoRoot(root) && !isDevKitDir
+        val isDevKitParent = !isDevKitDir && devKitParentRoots.contains(root)
+        val isCacheDir = !isLocalRepoRoot(root) && !isDevKitDir && !isDevKitParent
 
         for (event in events) {
             val contextName = (event.context() as? Path) ?: continue
             val resolved = path.resolve(contextName)
 
+            // a polling watch service reports a directory that was deleted and created again as modified
+            if (event.kind() != StandardWatchEventKinds.ENTRY_DELETE && isDevKitRoot(resolved)) {
+                restoreDevKitDirWatch(resolved)
+                continue
+            }
+
             when (event.kind()) {
                 StandardWatchEventKinds.ENTRY_CREATE -> {
-                    if (!isDevKitDir && Files.isDirectory(resolved)) {
+                    if (!isDevKitDir && !isDevKitParent && Files.isDirectory(resolved)) {
                         registerSubdirectoriesWatch(resolved, root)
                     }
                 }
@@ -245,7 +272,9 @@ internal class KefsFileWatcher(
             return true
         }
 
-        if (isDevKitDir) {
+        if (isDevKitParent) {
+            // only the dev kit dirs are of interest there, and they are handled above
+        } else if (isDevKitDir) {
             callback.onDevKitDirChange(root)
         } else if (!isCacheDir) {
             callback.onLocalRepoChange(root)
@@ -273,6 +302,7 @@ internal class KefsFileWatcher(
             cancelAllWatchKeys()
             localRepoRoots.clear()
             devKitRoots.clear()
+            devKitParentRoots.clear()
             watchService?.let { service ->
                 runCatchingExceptCancellation { service.close() }
             }
@@ -285,6 +315,7 @@ internal class KefsFileWatcher(
         cancelAllWatchKeys()
         localRepoRoots.clear()
         devKitRoots.clear()
+        devKitParentRoots.clear()
         watchService?.let { service ->
             runCatchingExceptCancellation { service.close() }
         }
@@ -324,6 +355,23 @@ internal class KefsFileWatcher(
                 watchedDirToKey[dir] = key
             }
         }
+    }
+
+    /**
+     * Watches a dev kit dir that was deleted and is created again.
+     */
+    private fun restoreDevKitDirWatch(dir: Path) {
+        if (watchedDirToKey[dir]?.isValid == true || !Files.isDirectory(dir)) {
+            return
+        }
+
+        logger.debug("File watcher: dev kit dir is back $dir")
+        deregisterWatchedDir(dir)
+        registeredRoots.add(dir)
+        registerDirectoryWatch(dir, dir)
+
+        // the jar could be created before the directory is watched again
+        callback.onDevKitDirChange(dir)
     }
 
     /**

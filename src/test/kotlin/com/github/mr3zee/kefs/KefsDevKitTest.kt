@@ -108,6 +108,29 @@ class KefsDevKitTest {
     }
 
     @Test
+    fun `cached jar of an artifact with a longer name is not matched`() {
+        val name = KefsDevKit.cachedJarName("my-plugin-cli", "0123456789abcdef0123456789abcdef")
+
+        assertEquals(true, KefsDevKit.isCachedJarOf("my-plugin-cli", name))
+        assertEquals(false, KefsDevKit.isCachedJarOf("my-plugin", name))
+        assertEquals(false, KefsDevKit.isCachedJarOf("my-plugin", "my-plugin-0123456789ab.jar.tmp"))
+    }
+
+    @Test
+    fun `unreadable jars are told apart from regular ones`() {
+        val regular = jar("regular-1.0.0.jar", multiRelease = false, *devKitEntries)
+        val devKit = jar("plugin-1.0.0.jar", multiRelease = true, *devKitEntries)
+
+        // a jar that is still being written has no central directory yet
+        val partial = tempDir.resolve("partial-1.0.0.jar")
+        Files.write(partial, Files.readAllBytes(devKit).copyOf(Files.size(devKit).toInt() / 2))
+
+        assertEquals(DevKitDetection.NotDevKit, KefsDevKit.inspect(regular))
+        assertEquals(DevKitDetection.Incomplete, KefsDevKit.inspect(partial))
+        assertEquals("com.example", (KefsDevKit.inspect(devKit) as DevKitDetection.DevKit).info.pluginId)
+    }
+
+    @Test
     fun `analyzer maps versioned classes and skips dependencies`(): Unit = runBlocking {
         val result = KefsJarAnalyzer.analyze(jar("plugin-1.0.0.jar", multiRelease = true, *devKitEntries))
 

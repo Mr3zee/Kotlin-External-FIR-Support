@@ -27,6 +27,15 @@ internal class DevKitJarInfo(
     val kotlinVersions: List<String>,
 )
 
+internal sealed interface DevKitDetection {
+    class DevKit(val info: DevKitJarInfo) : DevKitDetection
+
+    object NotDevKit : DevKitDetection
+
+    // the jar can't be read, most likely it is still being written
+    object Incomplete : DevKitDetection
+}
+
 internal data class FileStamp(
     val size: Long,
     val lastModified: Long,
@@ -50,16 +59,29 @@ internal object KefsDevKit {
     // <artifact-id>-<version>
     private val artifactVersionRegex = "^(.+?)-(\\d.*)$".toRegex()
 
+    private const val CACHED_CHECKSUM_LENGTH = 12
+    private val cachedChecksumRegex = "[0-9a-f]{$CACHED_CHECKSUM_LENGTH}".toRegex()
+
     /**
      * Returns dev kit info for the [jar] or null if it wasn't produced by the dev kit
      * (or can't be read, for example, when it is still being written).
      */
     fun detect(jar: Path): DevKitJarInfo? {
-        return try {
+        return (inspect(jar) as? DevKitDetection.DevKit)?.info
+    }
+
+    /**
+     * Same as [detect], but tells apart the jars that are not dev kit ones
+     * and the jars that can't be read and may become dev kit ones once they are fully written.
+     */
+    fun inspect(jar: Path): DevKitDetection {
+        val info = try {
             doDetect(jar)
         } catch (_: Exception) {
-            null
+            return DevKitDetection.Incomplete
         }
+
+        return if (info != null) DevKitDetection.DevKit(info) else DevKitDetection.NotDevKit
     }
 
     private fun doDetect(jar: Path): DevKitJarInfo? {
@@ -155,11 +177,17 @@ internal object KefsDevKit {
      * A jar that is already loaded by the IDE is never overwritten this way.
      */
     fun cachedJarName(artifact: String, checksum: String): String {
-        return "$artifact-${checksum.take(12)}.jar"
+        return "$artifact-${checksum.take(CACHED_CHECKSUM_LENGTH)}.jar"
     }
 
     fun isCachedJarOf(artifact: String, fileName: String): Boolean {
-        return fileName.startsWith("$artifact-") && fileName.endsWith(".jar")
+        if (!fileName.startsWith("$artifact-") || !fileName.endsWith(".jar")) {
+            return false
+        }
+
+        // `my-plugin-cli-<checksum>.jar` is not a jar of `my-plugin`
+        val checksum = fileName.substring(artifact.length + 1, fileName.length - ".jar".length)
+        return cachedChecksumRegex.matches(checksum)
     }
 
     /**

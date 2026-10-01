@@ -441,6 +441,57 @@ class KefsFileWatcherTest {
         assertTrue("Dev kit dir must not be treated as a local repo", localRepoChanges.isEmpty())
     }
 
+    @OptIn(ExperimentalPathApi::class)
+    @Test
+    fun testDevKitDirDeletedAndCreatedAgain(): Unit = runBlocking {
+        val devKitDir = tempDir.resolve("build/libs").also { it.createDirectories() }
+        val jar = devKitDir.resolve("plugin.jar")
+        createFile(jar, "original")
+
+        watcher.registerDevKitDir(devKitDir)
+
+        withContext(Dispatchers.IO) {
+            devKitDir.deleteRecursively()
+        }
+
+        // let the watcher notice that the dir is gone
+        processEventsFor(12000)
+        devKitDirChanges.clear()
+
+        // the parent reports the dir, the watch is restored without registering it again
+        createFile(jar, "rebuilt")
+        awaitCondition(timeoutMs = 30000) { devKitDirChanges.isNotEmpty() }
+        assertEquals(devKitDir.toAbsolutePath().normalize(), devKitDirChanges.first())
+
+        processEventsFor(3000)
+        devKitDirChanges.clear()
+
+        modifyFile(jar, "modified")
+        awaitCondition(timeoutMs = 30000) { devKitDirChanges.isNotEmpty() }
+
+        assertEquals(devKitDir.toAbsolutePath().normalize(), devKitDirChanges.first())
+        assertEquals("Parent of a dev kit dir must not be treated as a cache dir", 0, cacheDirChangeCount.get())
+        assertTrue("Parent of a dev kit dir must not be treated as a local repo", localRepoChanges.isEmpty())
+    }
+
+    @OptIn(ExperimentalPathApi::class)
+    @Test
+    fun testDevKitDirParentDeleted(): Unit = runBlocking {
+        val devKitDir = tempDir.resolve("build/libs").also { it.createDirectories() }
+        createFile(devKitDir.resolve("plugin.jar"), "original")
+
+        watcher.registerDevKitDir(devKitDir)
+
+        withContext(Dispatchers.IO) {
+            tempDir.resolve("build").deleteRecursively()
+        }
+
+        processEventsFor(12000)
+
+        assertEquals("Lost parent of a dev kit dir must not be treated as a cache dir", 0, cacheDirChangeCount.get())
+        assertTrue("Lost parent of a dev kit dir must not be treated as a local repo", localRepoChanges.isEmpty())
+    }
+
     // --- Helpers ---
 
     private suspend fun createFile(path: Path, content: String) {
