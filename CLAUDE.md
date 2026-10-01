@@ -57,7 +57,7 @@ Requires **JDK 21** (configured via Gradle toolchain). Uses **Gradle 9.2.0** wit
 
 5. **`KefsExceptionAnalyzerService`** monitors IDE exceptions and matches stack traces against loaded plugin classes (analyzed by `KefsJarAnalyzer`) to identify which plugin caused a crash.
 
-6. **Compiler Plugin DevKit jars** (`KefsDevKit.kt`) bypass descriptors and `KefsJarLocator` entirely. `KefsProvider` asks `KefsStorage.getDevKitPluginPath` first: a jar with the `Kotlin-Compiler-Plugin-Multi-Release` manifest attribute and `META-INF/kotlin/plugin/<pluginId>/versions/` is self-sufficient, so it is only copied into the cache dir under a content-based name (a loaded jar is never overwritten) and stored in `pluginsCache` like any other artifact. The plugin name is the dev kit plugin id; descriptors are synthesized by `KefsDevKitRegistry` (not stored in settings, disabled ids live in the workspace file). The directory of the source jar is watched for hot-reload.
+6. **Compiler Plugin DevKit jars** (`KefsDevKit.kt`) bypass descriptors and `KefsJarLocator` entirely. `KefsProvider` asks `KefsStorage.getDevKitPluginPath` first: a jar with the `Kotlin-Compiler-Plugin-Multi-Release` manifest attribute and `META-INF/kotlin/plugin/<pluginId>/versions/` is self-sufficient, so it is only copied into the cache dir under a content-based name (a loaded jar is never overwritten) and stored in `pluginsCache` like any other artifact. The plugin name is the dev kit plugin id; descriptors are synthesized by `KefsDevKitRegistry` (not stored in settings, disabled ids live in the workspace file). The directory of the source jar is watched for hot-reload. Before loading, `KefsDevKitVersions` repeats the dev kit's own runtime version resolution (the jar's bundled `ide-mappings.txt` + the `versions/` directories): if no build matches the IDE (IDE older than the lowest one), the artifact is marked `FailedToFetch` and not provided. There is no upper bound — a newer IDE gets the newest build with `Jar.kotlinVersionMismatch` set, and `KefsStorage.unloadIncompatibleDevKitJars` stops providing it once the exception analyzer matches a probably-incompatible exception.
 
 ### Requested, Resolved, and Kotlin versions
 'Version' word of an artifact can relate to different things.
@@ -88,7 +88,7 @@ Kotlin version can be project version or IDE version:
 
 ### IDE-Version-Specific Code
 
-The plugin supports multiple IntelliJ platform versions. `VersionSpecificApi` defines the interface; each `src/{251,252,253,261}/kotlin/.../VersionSpecificApiImpl.kt` provides the implementation. The active source set is selected at build time based on `pluginSinceBuild` in `gradle.properties`.
+The plugin supports multiple IntelliJ platform versions. `VersionSpecificApi` defines the interface; each `src/{251,252,253,261,262}/kotlin/.../VersionSpecificApiImpl.kt` provides the implementation. The active source set is selected at build time based on `pluginSinceBuild` in `gradle.properties`.
 
 ### Multi-Version Release
 

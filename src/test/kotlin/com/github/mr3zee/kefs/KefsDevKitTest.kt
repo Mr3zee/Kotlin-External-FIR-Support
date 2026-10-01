@@ -31,7 +31,12 @@ class KefsDevKitTest {
         tempDir.deleteRecursively()
     }
 
-    private fun jar(name: String, multiRelease: Boolean, vararg entries: String): Path {
+    private fun jar(
+        name: String,
+        multiRelease: Boolean,
+        vararg entries: String,
+        contents: Map<String, String> = emptyMap(),
+    ): Path {
         val manifest = Manifest().apply {
             mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"
             if (multiRelease) {
@@ -43,6 +48,11 @@ class KefsDevKitTest {
         JarOutputStream(Files.newOutputStream(path), manifest).use { jos ->
             entries.forEach {
                 jos.putNextEntry(ZipEntry(it))
+                jos.closeEntry()
+            }
+            contents.forEach { (entry, content) ->
+                jos.putNextEntry(ZipEntry(entry))
+                jos.write(content.toByteArray())
                 jos.closeEntry()
             }
         }
@@ -65,6 +75,36 @@ class KefsDevKitTest {
         assertNotNull(info)
         assertEquals("com.example", info!!.pluginId)
         assertEquals(listOf("2.2.0", "2.3.20-ij253-45"), info.kotlinVersions)
+    }
+
+    @Test
+    fun `reads ide mappings of a dev kit jar`() {
+        val mappings = """
+            # IntelliJ IDEA 2025.3.1.1 (stable)
+            253.29346.240=2.3.0-dev-9992
+
+            262.9437.185=2.4.20-dev-6724
+        """.trimIndent()
+
+        val info = KefsDevKit.detect(
+            jar(
+                "plugin-1.0.0.jar",
+                multiRelease = true,
+                *devKitEntries,
+                contents = mapOf(
+                    "META-INF/org/jetbrains/kotlin/compiler/plugin/devkit/ide-mappings.txt" to mappings,
+                    // mappings of an embedded dev kit library are not the ones of the plugin
+                    "META-INF/kotlin/plugin/com.example/dependencies/lib-1.0/" +
+                            "META-INF/org/jetbrains/kotlin/compiler/plugin/devkit/ide-mappings.txt" to "251.1.1=2.1.0",
+                ),
+            )
+        )
+
+        assertEquals(
+            mapOf("253.29346.240" to "2.3.0-dev-9992", "262.9437.185" to "2.4.20-dev-6724"),
+            info!!.ideMappings,
+        )
+        assertEquals(emptyMap<String, String>(), KefsDevKit.detect(jar("other-1.0.0.jar", true, *devKitEntries))!!.ideMappings)
     }
 
     @Test

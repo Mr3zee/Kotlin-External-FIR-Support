@@ -105,12 +105,18 @@ internal class KefsExceptionAnalyzerService(
 
                 logger.debug("Exception detected for $ids: ${exception.message}")
 
+                val isProbablyIncompatible = exception.isProbablyIncompatible()
+
                 reporter.matched(
                     ids = ids.toList(),
                     exception = exception,
                     autoDisable = state.autoDisable,
-                    isProbablyIncompatible = exception.isProbablyIncompatible(),
+                    isProbablyIncompatible = isProbablyIncompatible,
                 )
+
+                if (isProbablyIncompatible) {
+                    project.service<KefsStorage>().unloadIncompatibleDevKitJars(ids, exception)
+                }
             }
         }
 

@@ -1050,10 +1050,47 @@ internal class KefsStorage(
 
         val artifactsMap = pluginsCache.getOrPut(pluginName) { ConcurrentHashMap() }
 
+        val versionService = service<KotlinVersionService>()
+        val compatibility = KefsDevKitVersions.compatibility(
+            pluginKotlinVersions = info.kotlinVersions,
+            ideMappings = info.ideMappings,
+            ideBuild = versionService.getIdeBuildNumber(),
+            // the dev kit resolves the versions of Android Studio with its own mappings
+            kotlinVersion = versionService.getRawKotlinIdePluginVersion(),
+        )
+
+        if (compatibility is DevKitCompatibility.Unsupported) {
+            // the dev kit has no code to load for this IDE and fails with ClassNotFoundException
+            logger.warn(
+                "The dev kit jar $source doesn't support Kotlin ${compatibility.ideKotlinVersion}, " +
+                        "supported versions: ${info.kotlinVersions}"
+            )
+
+            val failed = ArtifactState.FailedToFetch(
+                KefsBundle.message(
+                    "devkit.unsupported.ide",
+                    compatibility.ideKotlinVersion,
+                    info.kotlinVersions.joinToString(", "),
+                )
+            )
+            artifactsMap[key] = failed
+            devKitSources[source] = loaded
+            publishDevKitStatus(loaded, failed, isNew = false)
+            statusPublisher.redraw()
+
+            return oldState is ArtifactState.Cached
+        }
+
+        // There is no upper bound: the newest build of the plugin is loaded into a newer IDE.
+        // If it fails there, the mismatch is reported and the jar is unloaded, see unloadIncompatibleDevKitJars.
+        val kotlinVersionMismatch = (compatibility as? DevKitCompatibility.Supported)
+            ?.takeIf { it.isNewerIde }
+            ?.let { KotlinVersionMismatch(ideVersion = it.ideKotlinVersion, jarVersion = it.pluginKotlinVersion) }
+
         val selfUpdate = fileWatcher.markSelfUpdateStart()
         val jarResult = runCatchingExceptCancellation {
             try {
-                copyDevKitJar(source, pluginName, artifact, requestedVersion)
+                copyDevKitJar(source, pluginName, artifact, requestedVersion, kotlinVersionMismatch)
             } finally {
                 selfUpdate.end()
             }
@@ -1116,6 +1153,7 @@ internal class KefsStorage(
         pluginName: String,
         artifact: String,
         requestedVersion: RequestedVersion,
+        kotlinVersionMismatch: KotlinVersionMismatch?,
     ): Jar {
         val kotlinIdeVersion = service<KotlinVersionService>().getKotlinIdePluginVersion()
         val destination = cacheDirectory(kotlinIdeVersion, pluginName, requestedVersion)
@@ -1137,7 +1175,58 @@ internal class KefsStorage(
                 .forEach { stale -> runCatching { Files.deleteIfExists(stale) } }
         }
 
-        return Jar(path = jarPath, checksum = checksum, isLocal = true, kotlinVersionMismatch = null)
+        return Jar(path = jarPath, checksum = checksum, isLocal = true, kotlinVersionMismatch = kotlinVersionMismatch)
+    }
+
+    /**
+     * Dev kit jars have no upper bound for the Kotlin version, so the newest build of a plugin is loaded
+     * into an IDE that is newer than all of its builds. If such a jar turns out to be binary incompatible,
+     * it is not provided to the IDE anymore, until it is rebuilt.
+     */
+    fun unloadIncompatibleDevKitJars(ids: Collection<JarId>, exception: Throwable) {
+        var unloaded = false
+
+        devKitSources.forEach { (source, known) ->
+            val isMatched = ids.any {
+                it.pluginName == known.pluginName &&
+                        it.mavenId == known.key.mavenId &&
+                        it.requestedVersion == known.key.requestedVersion
+            }
+            if (!isMatched) {
+                return@forEach
+            }
+
+            val artifactsMap = pluginsCache[known.pluginName] ?: return@forEach
+            val state = artifactsMap[known.key] as? ArtifactState.Cached ?: return@forEach
+            val mismatch = state.jar.kotlinVersionMismatch ?: return@forEach
+
+            val failed = ArtifactState.FailedToFetch(
+                KefsBundle.message(
+                    "devkit.unloaded.newer.ide",
+                    mismatch.ideVersion,
+                    mismatch.jarVersion,
+                    "${exception::class.java.name}: ${exception.message}",
+                )
+            )
+
+            // the jar could have been reloaded in the meantime
+            if (!artifactsMap.replace(known.key, state, failed)) {
+                return@forEach
+            }
+
+            logger.warn(
+                "Unloaded the dev kit jar $source: it failed in the IDE with Kotlin ${mismatch.ideVersion}, " +
+                        "the newest supported version is ${mismatch.jarVersion}"
+            )
+
+            publishDevKitStatus(known, failed, isNew = false)
+            unloaded = true
+        }
+
+        if (unloaded) {
+            statusPublisher.redraw()
+            invalidateKotlinPluginCache()
+        }
     }
 
     private fun publishDevKitStatus(source: DevKitSource, state: ArtifactState, isNew: Boolean) {
@@ -1305,7 +1394,7 @@ internal class KefsStorage(
         )
     }
 
-    @Suppress("UnstableApiUsage")
+    @Suppress("UnstableApiUsage", "JetBrainsInternalApiUsage")
     private suspend inline fun resolveCacheDir(getApi: () -> EelApi): Path? {
         if (!resolvedCacheDir.compareAndSet(false, true)) {
             return _cacheDir.await()

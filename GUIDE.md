@@ -374,6 +374,13 @@ and loads the very jar that is used in the project:
 * Runtime exceptions are analyzed as for any other plugin, including the editor notification,
   failure reports and auto-disabling. A disabled dev kit plugin can be enabled back from the tool window.
   Classes of the dependencies embedded into the jar are not used for exception matching.
+* KEFS checks that the jar has a build for the Kotlin version of the IDE, the same way the dev kit picks one in runtime.
+  If the IDE is older than every build of the plugin, the jar is not loaded
+  and the version is marked as failed in the tool window, with the supported Kotlin versions in the details.
+* There is no upper bound: an IDE that is newer than every build of the plugin gets the newest one.
+  If it then throws exceptions that point to a binary incompatibility (like `NoSuchMethodError`),
+  KEFS reports the version mismatch and unloads the jar, so the IDE keeps working without the plugin.
+  The jar is loaded again once it is rebuilt.
 * "Hot-reload" works without any setup: KEFS watches the directory of the original jar
   (for example, `build/libs` of your compiler plugin module) and reloads the plugin when the jar is rebuilt.
   The **Update** action checks the jars for changes too.

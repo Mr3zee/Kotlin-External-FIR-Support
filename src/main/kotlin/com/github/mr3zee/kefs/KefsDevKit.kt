@@ -25,6 +25,8 @@ import kotlin.io.path.name
 internal class DevKitJarInfo(
     val pluginId: String,
     val kotlinVersions: List<String>,
+    // IDE build -> Kotlin version, the dev kit uses them instead of the Kotlin version reported by the IDE
+    val ideMappings: Map<String, String> = emptyMap(),
 )
 
 internal sealed interface DevKitDetection {
@@ -48,6 +50,7 @@ internal object KefsDevKit {
 
     private const val MANIFEST_PATH = "META-INF/MANIFEST.MF"
     private const val PLUGIN_PATH = "META-INF/kotlin/plugin"
+    private const val IDE_MAPPINGS_PATH = "META-INF/org/jetbrains/kotlin/compiler/plugin/devkit/ide-mappings.txt"
 
     // META-INF/kotlin/plugin/<pluginId>/versions/<kotlin-version>/...
     private val versionEntryRegex = "^$PLUGIN_PATH/([^/]+)/versions/([^/]+)/".toRegex()
@@ -97,13 +100,18 @@ internal object KefsDevKit {
                 return null
             }
 
-            return devKitInfo(jarFile.stream().map { it.name }.iterator().asSequence())
+            val ideMappings = jarFile.getJarEntry(IDE_MAPPINGS_PATH)?.let { entry ->
+                jarFile.getInputStream(entry).use { it.readBytes().decodeToString() }
+            }
+
+            return devKitInfo(jarFile.stream().map { it.name }.iterator().asSequence(), ideMappings)
         }
     }
 
     // for paths that are not backed by a regular file: reads the jar sequentially
     private fun doDetectStreaming(jar: Path): DevKitJarInfo? {
         var isMultiRelease: Boolean? = null
+        var ideMappings: String? = null
         val names = mutableListOf<String>()
 
         ZipInputStream(Files.newInputStream(jar)).use { zis ->
@@ -117,6 +125,9 @@ internal object KefsDevKit {
                         return null
                     }
                 } else {
+                    if (entry.name == IDE_MAPPINGS_PATH) {
+                        ideMappings = zis.readBytes().decodeToString()
+                    }
                     names.add(entry.name)
                 }
 
@@ -128,10 +139,10 @@ internal object KefsDevKit {
             return null
         }
 
-        return devKitInfo(names.asSequence())
+        return devKitInfo(names.asSequence(), ideMappings)
     }
 
-    private fun devKitInfo(entryNames: Sequence<String>): DevKitJarInfo? {
+    private fun devKitInfo(entryNames: Sequence<String>, ideMappings: String?): DevKitJarInfo? {
         val versions = LinkedHashMap<String, LinkedHashSet<String>>()
 
         entryNames.forEach { name ->
@@ -144,7 +155,11 @@ internal object KefsDevKit {
         // the dev kit expects the plugin id to be the only directory there
         val (pluginId, kotlinVersions) = versions.entries.singleOrNull() ?: return null
 
-        return DevKitJarInfo(pluginId, kotlinVersions.toList())
+        return DevKitJarInfo(
+            pluginId = pluginId,
+            kotlinVersions = kotlinVersions.toList(),
+            ideMappings = ideMappings?.let { KefsDevKitVersions.parseIdeMappings(it) }.orEmpty(),
+        )
     }
 
     fun stampOf(path: Path): FileStamp? {

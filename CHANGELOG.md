@@ -11,6 +11,8 @@
   (the dev kit is available only internally at JetBrains for now).
   Such jars are detected by their content and loaded as is, without any configuration, downloads or version matching.
   Exception analysis, hot-reload and statuses in the tool window work for them as for any other plugin.
+  A jar that has no build for the Kotlin version of the IDE is not loaded and is reported in the tool window.
+  A jar loaded into an IDE newer than all of its builds is unloaded if it turns out to be binary incompatible.
 
 ## [0.3.14] - 2026-08-17
 
