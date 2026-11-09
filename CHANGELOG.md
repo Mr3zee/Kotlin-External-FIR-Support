@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- KEFS checks a Compiler Plugin DevKit jar against the IDE build range in the jar manifest,
+  not against the Kotlin versions of its builds.
+  The range is in the `Kotlin-Compiler-Plugin-Since-Build` and `Kotlin-Compiler-Plugin-Until-Build` attributes.
+  - If the IDE build is out of the range, KEFS doesn't load the jar and shows the supported range in the tool window.
+  - If the jar has no `Kotlin-Compiler-Plugin-Until-Build` attribute, KEFS loads it into every newer IDE
+    and unloads it when it is binary incompatible.
+  - KEFS doesn't detect a jar that has no `Kotlin-Compiler-Plugin-Since-Build` attribute.
+    Rebuild such jars with the current dev kit.
+
 ## [0.4.0] - 2026-10-01
 
 ### Added
