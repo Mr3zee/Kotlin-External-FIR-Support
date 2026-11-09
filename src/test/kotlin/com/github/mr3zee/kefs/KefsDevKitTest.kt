@@ -1,5 +1,6 @@
 package com.github.mr3zee.kefs
 
+import com.intellij.openapi.util.BuildNumber
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -31,16 +32,22 @@ class KefsDevKitTest {
         tempDir.deleteRecursively()
     }
 
+    private val ideBuildNumber = BuildNumber.fromString("263.1234")
+
     private fun jar(
         name: String,
-        multiRelease: Boolean,
+        sinceBuild: BuildNumber?,
         vararg entries: String,
+        untilBuild: BuildNumber? = null,
         contents: Map<String, String> = emptyMap(),
     ): Path {
         val manifest = Manifest().apply {
             mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"
-            if (multiRelease) {
-                mainAttributes.putValue(KefsDevKit.MANIFEST_ATTRIBUTE, "true")
+            if (sinceBuild != null) {
+                mainAttributes.putValue(KefsDevKit.SINCE_BUILD_ATTRIBUTE, sinceBuild.toString())
+            }
+            if (untilBuild != null) {
+                mainAttributes.putValue(KefsDevKit.UNTIL_BUILD_ATTRIBUTE, untilBuild.toString())
             }
         }
 
@@ -70,51 +77,25 @@ class KefsDevKitTest {
 
     @Test
     fun `detects dev kit jar`() {
-        val info = KefsDevKit.detect(jar("plugin-1.0.0.jar", multiRelease = true, *devKitEntries))
+        val info = KefsDevKit.detect(jar("plugin-1.0.0.jar", sinceBuild = ideBuildNumber, *devKitEntries))
 
         assertNotNull(info)
         assertEquals("com.example", info!!.pluginId)
-        assertEquals(listOf("2.2.0", "2.3.20-ij253-45"), info.kotlinVersions)
-    }
-
-    @Test
-    fun `reads ide mappings of a dev kit jar`() {
-        val mappings = """
-            # IntelliJ IDEA 2025.3.1.1 (stable)
-            253.29346.240=2.3.0-dev-9992
-
-            262.9437.185=2.4.20-dev-6724
-        """.trimIndent()
-
-        val info = KefsDevKit.detect(
-            jar(
-                "plugin-1.0.0.jar",
-                multiRelease = true,
-                *devKitEntries,
-                contents = mapOf(
-                    "META-INF/org/jetbrains/kotlin/compiler/plugin/devkit/ide-mappings.txt" to mappings,
-                    // mappings of an embedded dev kit library are not the ones of the plugin
-                    "META-INF/kotlin/plugin/com.example/dependencies/lib-1.0/" +
-                            "META-INF/org/jetbrains/kotlin/compiler/plugin/devkit/ide-mappings.txt" to "251.1.1=2.1.0",
-                ),
-            )
-        )
-
-        assertEquals(
-            mapOf("253.29346.240" to "2.3.0-dev-9992", "262.9437.185" to "2.4.20-dev-6724"),
-            info!!.ideMappings,
-        )
-        assertEquals(emptyMap<String, String>(), KefsDevKit.detect(jar("other-1.0.0.jar", true, *devKitEntries))!!.ideMappings)
+        assertEquals(ideBuildNumber, info.sinceBuild)
+        assertNull(info.untilBuild)
     }
 
     @Test
     fun `ignores jars without the manifest attribute`() {
-        assertNull(KefsDevKit.detect(jar("plugin-1.0.0.jar", multiRelease = false, *devKitEntries)))
+        assertNull(KefsDevKit.detect(jar("plugin-1.0.0.jar", sinceBuild = null, *devKitEntries)))
     }
 
     @Test
-    fun `ignores jars without versions`() {
-        assertNull(KefsDevKit.detect(jar("plugin-1.0.0.jar", multiRelease = true, "com/example/PluginInfo.class")))
+    fun `accepts jars without plugin id`() {
+        val info =
+            KefsDevKit.detect(jar("plugin-1.0.0.jar", sinceBuild = ideBuildNumber, "com/example/PluginInfo.class"))
+        assertNotNull(info)
+        assertEquals("plugin", info!!.pluginId)
     }
 
     @Test
@@ -171,8 +152,8 @@ class KefsDevKitTest {
 
     @Test
     fun `unreadable jars are told apart from regular ones`() {
-        val regular = jar("regular-1.0.0.jar", multiRelease = false, *devKitEntries)
-        val devKit = jar("plugin-1.0.0.jar", multiRelease = true, *devKitEntries)
+        val regular = jar("regular-1.0.0.jar", sinceBuild = null, *devKitEntries)
+        val devKit = jar("plugin-1.0.0.jar", sinceBuild = ideBuildNumber, *devKitEntries)
 
         // a jar that is still being written has no central directory yet
         val partial = tempDir.resolve("partial-1.0.0.jar")
@@ -185,7 +166,7 @@ class KefsDevKitTest {
 
     @Test
     fun `analyzer maps versioned classes and skips dependencies`(): Unit = runBlocking {
-        val result = KefsJarAnalyzer.analyze(jar("plugin-1.0.0.jar", multiRelease = true, *devKitEntries))
+        val result = KefsJarAnalyzer.analyze(jar("plugin-1.0.0.jar", sinceBuild = ideBuildNumber, *devKitEntries))
 
         assertEquals(
             KefsAnalyzedJar.Success(
@@ -193,7 +174,6 @@ class KefsDevKitTest {
                     "com.example.PluginInfo",
                     "com.example.Registrar",
                     "com.example.Registrar.Nested",
-                    "org.devkit.Runtime",
                 )
             ),
             result,

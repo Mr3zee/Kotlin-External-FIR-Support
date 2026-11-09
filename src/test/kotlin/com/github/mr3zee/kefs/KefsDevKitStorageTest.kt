@@ -1,5 +1,6 @@
 package com.github.mr3zee.kefs
 
+import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -83,7 +84,7 @@ class KefsDevKitStorageTest : BasePlatformTestCase() {
     private fun devKitJarBytes(): ByteArray {
         val manifest = Manifest().apply {
             mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"
-            mainAttributes.putValue(KefsDevKit.MANIFEST_ATTRIBUTE, "true")
+            mainAttributes.putValue(KefsDevKit.SINCE_BUILD_ATTRIBUTE, ApplicationInfo.getInstance().build.asString())
         }
         val bytes = ByteArrayOutputStream()
         JarOutputStream(bytes, manifest).use { jar ->

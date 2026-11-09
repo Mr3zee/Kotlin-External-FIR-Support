@@ -6,6 +6,8 @@ import com.intellij.openapi.components.SimplePersistentStateComponent
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
+import com.intellij.openapi.util.BuildNumber
+import org.jetbrains.kotlin.tools.projectWizard.core.asPath
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
@@ -15,6 +17,9 @@ import java.util.jar.Manifest
 import java.util.zip.ZipInputStream
 import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.io.path.name
+import kotlin.io.path.pathString
+import kotlin.io.path.relativeTo
+import kotlin.streams.asSequence
 
 /**
  * A jar produced by the [Compiler Plugin DevKit](https://github.com/Kotlin/compiler-plugin-dev-kit).
@@ -25,9 +30,8 @@ import kotlin.io.path.name
  */
 internal class DevKitJarInfo(
     val pluginId: String,
-    val kotlinVersions: List<String>,
-    // IDE build -> Kotlin version, the dev kit uses them instead of the Kotlin version reported by the IDE
-    val ideMappings: Map<String, String> = emptyMap(),
+    val sinceBuild: BuildNumber,
+    val untilBuild: BuildNumber?,
 )
 
 internal sealed interface DevKitDetection {
@@ -45,20 +49,14 @@ internal data class FileStamp(
 )
 
 internal object KefsDevKit {
-    const val MANIFEST_ATTRIBUTE = "Kotlin-Compiler-Plugin-Multi-Release"
+    const val SINCE_BUILD_ATTRIBUTE = "Kotlin-Compiler-Plugin-Since-Build"
+    const val UNTIL_BUILD_ATTRIBUTE = "Kotlin-Compiler-Plugin-Until-Build"
     const val REPOSITORY_NAME = "Compiler Plugin DevKit"
     const val UNKNOWN_VERSION = "unversioned"
 
     private const val MANIFEST_PATH = "META-INF/MANIFEST.MF"
     private const val PLUGIN_PATH = "META-INF/kotlin/plugin"
-    private const val IDE_MAPPINGS_PATH = "META-INF/org/jetbrains/kotlin/compiler/plugin/devkit/ide-mappings.txt"
-
-    // META-INF/kotlin/plugin/<pluginId>/versions/<kotlin-version>/...
-    private val versionEntryRegex = "^$PLUGIN_PATH/([^/]+)/versions/([^/]+)/".toRegex()
-
-    // nested entries are matched greedily, so a dev kit library embedded as a dependency resolves to its own classes
-    private val versionedPrefixRegex = "^.*$PLUGIN_PATH/[^/]+/versions/[^/]+/".toRegex()
-    private val dependencyRegex = "$PLUGIN_PATH/[^/]+/dependencies/".toRegex()
+    private const val VERSIONS_PATH = "versions"
 
     // <artifact-id>-<version>
     private val artifactVersionRegex = "^(.+?)-(\\d.*)$".toRegex()
@@ -97,69 +95,58 @@ internal object KefsDevKit {
 
         // only the central directory and the manifest are read, nothing else is unpacked
         JarFile(file, false).use { jarFile ->
-            if (jarFile.manifest?.mainAttributes?.getValue(MANIFEST_ATTRIBUTE) != "true") {
-                return null
-            }
+            val manifest = jarFile.manifest ?: return null
+            val sinceBuild = manifest.mainAttributes.getValue(SINCE_BUILD_ATTRIBUTE) ?: return null
+            val untilBuild = manifest.mainAttributes.getValue(UNTIL_BUILD_ATTRIBUTE)
 
-            val ideMappings = jarFile.getJarEntry(IDE_MAPPINGS_PATH)?.let { entry ->
-                jarFile.getInputStream(entry).use { it.readBytes().decodeToString() }
-            }
-
-            return devKitInfo(jarFile.stream().map { it.name }.iterator().asSequence(), ideMappings)
+            return devKitInfo(
+                sinceBuild,
+                untilBuild,
+                jarFile.stream().map { it.name }.asSequence(),
+                artifactAndVersion(jar).first
+            )
         }
     }
 
     // for paths that are not backed by a regular file: reads the jar sequentially
     private fun doDetectStreaming(jar: Path): DevKitJarInfo? {
-        var isMultiRelease: Boolean? = null
-        var ideMappings: String? = null
+        var sinceBuild: String? = null
+        var untilBuild: String? = null
         val names = mutableListOf<String>()
 
         ZipInputStream(Files.newInputStream(jar)).use { zis ->
-            var entry = zis.nextEntry
-            while (entry != null) {
+            generateSequence { zis.nextEntry }.forEach { entry ->
                 if (entry.name == MANIFEST_PATH) {
-                    isMultiRelease = Manifest(zis).mainAttributes.getValue(MANIFEST_ATTRIBUTE) == "true"
-
+                    val manifest = Manifest(zis)
                     // the manifest usually goes first, so regular jars are not read any further
-                    if (!isMultiRelease) {
-                        return null
-                    }
+                    sinceBuild = manifest.mainAttributes.getValue(SINCE_BUILD_ATTRIBUTE) ?: return null
+                    untilBuild = manifest.mainAttributes.getValue(UNTIL_BUILD_ATTRIBUTE)
                 } else {
-                    if (entry.name == IDE_MAPPINGS_PATH) {
-                        ideMappings = zis.readBytes().decodeToString()
-                    }
                     names.add(entry.name)
                 }
-
-                entry = zis.nextEntry
             }
         }
 
-        if (isMultiRelease != true) {
-            return null
-        }
+        if (sinceBuild == null) return null
 
-        return devKitInfo(names.asSequence(), ideMappings)
+        return devKitInfo(sinceBuild, untilBuild, names.asSequence(), artifactAndVersion(jar).first)
     }
 
-    private fun devKitInfo(entryNames: Sequence<String>, ideMappings: String?): DevKitJarInfo? {
-        val versions = LinkedHashMap<String, LinkedHashSet<String>>()
-
-        entryNames.forEach { name ->
-            versionEntryRegex.find(name)?.let { match ->
-                val (pluginId, version) = match.destructured
-                versions.getOrPut(pluginId) { LinkedHashSet() }.add(version)
-            }
-        }
-
-        // the dev kit expects the plugin id to be the only directory there
-        val (pluginId, kotlinVersions) = versions.entries.singleOrNull() ?: return null
+    private fun devKitInfo(
+        sinceBuild: String,
+        untilBuild: String?,
+        entryNames: Sequence<String>,
+        fallbackId: String,
+    ): DevKitJarInfo? {
+        val pluginIdPath = entryNames.find { name -> name.startsWith("$PLUGIN_PATH/") }
+        val pluginId = pluginIdPath?.removePrefix("$PLUGIN_PATH/")?.substringBefore("/")
+        val sinceBuild = BuildNumber.fromStringOrNull(sinceBuild) ?: return null
+        val untilBuild = untilBuild?.let(BuildNumber::fromStringOrNull)
 
         return DevKitJarInfo(
-            pluginId = pluginId,
-            kotlinVersions = kotlinVersions.toList(),
-            ideMappings = ideMappings?.let { KefsDevKitVersions.parseIdeMappings(it) }.orEmpty(),
+            pluginId = pluginId ?: fallbackId,
+            sinceBuild = sinceBuild,
+            untilBuild = untilBuild,
         )
     }
 
@@ -221,10 +208,13 @@ internal object KefsDevKit {
      * and exceptions with their frames can't be attributed to the plugin.
      */
     fun runtimeClassPath(entryName: String): String? {
-        val versioned = versionedPrefixRegex.find(entryName)
-        val path = if (versioned != null) entryName.substring(versioned.range.last + 1) else entryName
+        if (!entryName.startsWith(PLUGIN_PATH)) return entryName
+        // "$PLUGIN_PATH/<plugin-id>/versions/<version>/..."
+        val pluginPath = entryName.asPath().relativeTo(PLUGIN_PATH.asPath())
+        if (pluginPath.nameCount < 4) return null
+        if (pluginPath.getName(1).pathString != VERSIONS_PATH) return null
 
-        return if (dependencyRegex.containsMatchIn(path)) null else path
+        return pluginPath.subpath(3, pluginPath.nameCount).pathString
     }
 
     fun repository(source: Path): KotlinArtifactsRepository {

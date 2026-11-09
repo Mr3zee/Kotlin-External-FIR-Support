@@ -2,6 +2,7 @@
 
 package com.github.mr3zee.kefs
 
+import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.BaseState
 import com.intellij.openapi.components.Service
@@ -31,14 +32,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.collections.forEach
-import kotlin.io.path.ExperimentalPathApi
-import kotlin.io.path.Path
-import kotlin.io.path.deleteRecursively
-import kotlin.io.path.exists
-import kotlin.io.path.extension
-import kotlin.io.path.listDirectoryEntries
-import kotlin.io.path.name
+import kotlin.io.path.*
 import kotlin.time.Duration.Companion.minutes
 
 internal sealed interface ArtifactStatus {
@@ -1056,27 +1050,42 @@ internal class KefsStorage(
 
         val artifactsMap = pluginsCache.getOrPut(pluginName) { ConcurrentHashMap() }
 
-        val versionService = service<KotlinVersionService>()
+        val ideBuild = PluginManagerCore.buildNumber
         val compatibility = KefsDevKitVersions.compatibility(
-            pluginKotlinVersions = info.kotlinVersions,
-            ideMappings = info.ideMappings,
-            ideBuild = versionService.getIdeBuildNumber(),
-            // the dev kit resolves the versions of Android Studio with its own mappings
-            kotlinVersion = versionService.getRawKotlinIdePluginVersion(),
+            sinceBuild = info.sinceBuild,
+            untilBuild = info.untilBuild,
+            ideBuild = ideBuild,
         )
 
-        if (compatibility is DevKitCompatibility.Unsupported) {
-            // the dev kit has no code to load for this IDE and fails with ClassNotFoundException
-            logger.warn(
-                "The dev kit jar $source doesn't support Kotlin ${compatibility.ideKotlinVersion}, " +
-                        "supported versions: ${info.kotlinVersions}"
-            )
+        if (compatibility != DevKitCompatibility.Supported) {
+            when (compatibility) {
+                DevKitCompatibility.TooOld -> {
+                    logger.warn(
+                        "The dev kit jar $source doesn't support IJ $ideBuild, " +
+                                "since it's older than ${info.sinceBuild}"
+                    )
+                }
+
+                DevKitCompatibility.TooNew -> {
+                    logger.warn(
+                        "The dev kit jar $source doesn't support IJ $ideBuild, " +
+                                "since it's newer than ${info.untilBuild}"
+                    )
+                }
+            }
 
             val failed = ArtifactState.FailedToFetch(
-                KefsBundle.message(
-                    "devkit.unsupported.ide",
-                    compatibility.ideKotlinVersion,
-                    info.kotlinVersions.joinToString(", "),
+                if (info.untilBuild != null)
+                    KefsBundle.message(
+                        "devkit.unsupported.ide.range.closed",
+                        ideBuild,
+                        info.sinceBuild,
+                        info.untilBuild,
+                    )
+                else KefsBundle.message(
+                    "devkit.unsupported.ide.range.open",
+                    ideBuild,
+                    info.sinceBuild,
                 )
             )
             artifactsMap[key] = failed
@@ -1089,9 +1098,13 @@ internal class KefsStorage(
 
         // There is no upper bound: the newest build of the plugin is loaded into a newer IDE.
         // If it fails there, the mismatch is reported and the jar is unloaded, see unloadIncompatibleDevKitJars.
-        val kotlinVersionMismatch = (compatibility as? DevKitCompatibility.Supported)
-            ?.takeIf { it.isNewerIde }
-            ?.let { KotlinVersionMismatch(ideVersion = it.ideKotlinVersion, jarVersion = it.pluginKotlinVersion) }
+        val kotlinVersionMismatch = compatibility.takeIf { info.untilBuild == null }
+            ?.let {
+                KotlinVersionMismatch(
+                    ideVersion = ideBuild.asString(),
+                    jarVersion = info.sinceBuild.asString()
+                )
+            }
 
         // a cached jar that was deleted is restored under the same name, the IDE has to be told to ask for it again
         val isOldJarMissing = (oldState as? ArtifactState.Cached)?.jar?.path?.exists() == false
@@ -1154,7 +1167,7 @@ internal class KefsStorage(
         devKitSources[source] = loaded
 
         logger.debug(
-            "Loaded the dev kit jar $source (${info.pluginId}, Kotlin versions: ${info.kotlinVersions}) " +
+            "Loaded the dev kit jar $source (${info.pluginId}, compatibility range: ${info.sinceBuild}..${info.untilBuild}) " +
                     "as ${jar.path.name}, new: $isNew"
         )
 
@@ -1252,8 +1265,8 @@ internal class KefsStorage(
             }
 
             logger.warn(
-                "Unloaded the dev kit jar $source: it failed in the IDE with Kotlin ${mismatch.ideVersion}, " +
-                        "the newest supported version is ${mismatch.jarVersion}"
+                "Unloaded the dev kit jar $source: it failed in the IDE with build ${mismatch.ideVersion}, " +
+                        "it declares open-ended compatibility since ${mismatch.jarVersion}"
             )
 
             publishDevKitStatus(known, failed, isNew = false)
