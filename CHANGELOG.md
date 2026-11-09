@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-09
+
 ### Changed
 
 - KEFS checks a Compiler Plugin DevKit jar against the IDE build range in the jar manifest,
@@ -278,7 +280,8 @@
 - Initial scaffold created
   from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.14...0.4.0
 [0.3.14]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.13...0.3.14
 [0.3.13]: https://github.com/Mr3zee/Kotlin-External-FIR-Support/compare/0.3.12...0.3.13
