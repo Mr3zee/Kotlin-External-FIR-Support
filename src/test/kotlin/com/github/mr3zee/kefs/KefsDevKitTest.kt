@@ -179,4 +179,15 @@ class KefsDevKitTest {
             result,
         )
     }
+
+    @Test
+    fun runtimeClassPathUsesJarSeparators() {
+        val prefix = "META-INF/kotlin/plugin/my-plugin"
+
+        assertEquals("com/example/Foo.class", KefsDevKit.runtimeClassPath("com/example/Foo.class"))
+        assertEquals("com/example/Foo.class", KefsDevKit.runtimeClassPath("$prefix/versions/2.3.0/com/example/Foo.class"))
+        assertEquals("Foo.class", KefsDevKit.runtimeClassPath("$prefix/versions/2.3.0/Foo.class"))
+        assertNull(KefsDevKit.runtimeClassPath("$prefix/dependencies/com/example/Lib.class"))
+        assertNull(KefsDevKit.runtimeClassPath("$prefix/versions/2.3.0"))
+    }
 }

@@ -7,7 +7,6 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros.WORKSPACE_FILE
 import com.intellij.openapi.util.BuildNumber
-import org.jetbrains.kotlin.tools.projectWizard.core.asPath
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
@@ -17,8 +16,6 @@ import java.util.jar.Manifest
 import java.util.zip.ZipInputStream
 import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.io.path.name
-import kotlin.io.path.pathString
-import kotlin.io.path.relativeTo
 import kotlin.streams.asSequence
 
 /**
@@ -208,13 +205,14 @@ internal object KefsDevKit {
      * and exceptions with their frames can't be attributed to the plugin.
      */
     fun runtimeClassPath(entryName: String): String? {
-        if (!entryName.startsWith(PLUGIN_PATH)) return entryName
-        // "$PLUGIN_PATH/<plugin-id>/versions/<version>/..."
-        val pluginPath = entryName.asPath().relativeTo(PLUGIN_PATH.asPath())
-        if (pluginPath.nameCount < 4) return null
-        if (pluginPath.getName(1).pathString != VERSIONS_PATH) return null
+        if (!entryName.startsWith("$PLUGIN_PATH/")) return entryName
 
-        return pluginPath.subpath(3, pluginPath.nameCount).pathString
+        // "$PLUGIN_PATH/<plugin-id>/versions/<version>/<class path>"
+        // Jar entry names always use '/', so do not use Path here: on Windows, it gives '\\'.
+        val parts = entryName.removePrefix("$PLUGIN_PATH/").split('/', limit = 4)
+        if (parts.size < 4 || parts[1] != VERSIONS_PATH) return null
+
+        return parts[3]
     }
 
     fun repository(source: Path): KotlinArtifactsRepository {
