@@ -1058,21 +1058,14 @@ internal class KefsStorage(
         )
 
         if (compatibility != DevKitCompatibility.Supported) {
-            when (compatibility) {
-                DevKitCompatibility.TooOld -> {
-                    logger.warn(
-                        "The dev kit jar $source doesn't support IJ $ideBuild, " +
-                                "since it's older than ${info.sinceBuild}"
-                    )
-                }
-
-                DevKitCompatibility.TooNew -> {
-                    logger.warn(
-                        "The dev kit jar $source doesn't support IJ $ideBuild, " +
-                                "since it's newer than ${info.untilBuild}"
-                    )
-                }
+            // not a 'when': Kotlin of IDE 251-253 doesn't count the smart cast for exhaustiveness
+            val reason = if (compatibility == DevKitCompatibility.TooOld) {
+                "older than ${info.sinceBuild}"
+            } else {
+                "newer than ${info.untilBuild}"
             }
+
+            logger.warn("The dev kit jar $source doesn't support IJ $ideBuild, since it's $reason")
 
             val failed = ArtifactState.FailedToFetch(
                 if (info.untilBuild != null)
